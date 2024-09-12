@@ -114,6 +114,17 @@ app.post("/create-checkout-session", async (req, res) => {
 // Serve static files only if the frontend is hosted from the same project
 // If you're hosting the frontend separately, you can remove this
 
+// Create a login link for the connected account
+app.post("/create-login-link", async (req, res) => {
+  const { accountId } = req.body; // The connected account ID
+  try {
+    const loginLink = await stripe.accounts.createLoginLink(accountId);
+    res.json({ url: loginLink.url });
+  } catch (error) {
+    console.error("Failed to create login link:", error);
+    res.status(500).send({ error: error.message });
+  }
+});
 
 // For local development, you can still listen on a port
 if (process.env.NODE_ENV !== 'production') {
@@ -123,3 +134,6 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 module.exports = app; // Export for Vercel
+
+
+
