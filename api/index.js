@@ -96,8 +96,8 @@ app.post("/create-checkout-session", async (req, res) => {
         },
       },
       mode: 'payment',
-      success_url: 'https://www.savewithbidi.com/success-signup', // Customize your success URL
-      cancel_url: 'https://example.com/cancel',  // Customize your cancel URL
+      success_url: 'https://www.savewithbidi.com/payment-successful', // Customize your success URL
+      cancel_url: 'https://example.com/payment-cancelled',  // Customize your cancel URL
     });
 
     // Send the session ID back to the frontend
