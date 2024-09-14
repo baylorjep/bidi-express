@@ -1,6 +1,10 @@
 const express = require("express");
 const cors = require("cors"); // Import CORS
+const bodyParser = require('body-parser');
+
 const app = express();
+
+
 
 // Set your Stripe secret key. Remember to switch to your live secret key in production.
 const stripe = require("stripe")(
@@ -132,6 +136,76 @@ if (process.env.NODE_ENV !== 'production') {
     console.log("Node server listening on port 4242! Visit http://localhost:4242");
   });
 }
+
+// Webhook for stripe
+// Your webhook secret from the Stripe Dashboard
+const endpointSecret = 'whsec_...'; // Replace with your actual webhook signing secret
+
+// Webhook endpoint
+app.post('/webhook', bodyParser.raw({ type: 'application/json' }), (req, res) => {
+  const sig = req.headers['stripe-signature'];
+
+  let event;
+
+  try {
+    // Verify the event using the Stripe webhook secret
+    event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+  } catch (err) {
+    console.error('Webhook signature verification failed.', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // Handle the event
+  switch (event.type) {
+    case 'checkout.session.completed':
+      const session = event.data.object;
+      handleCheckoutSessionCompleted(session);
+      break;
+
+    case 'payment_intent.succeeded':
+      const paymentIntent = event.data.object;
+      handlePaymentIntentSucceeded(paymentIntent);
+      break;
+
+    case 'payment_intent.payment_failed':
+      const failedPaymentIntent = event.data.object;
+      handlePaymentIntentFailed(failedPaymentIntent);
+      break;
+
+    default:
+      console.warn(`Unhandled event type ${event.type}`);
+  }
+
+  // Return a response to acknowledge receipt of the event
+  res.json({ received: true });
+});
+
+// Define functions to handle specific events
+async function handleCheckoutSessionCompleted(session) {
+  // Implement logic to update your database and application state
+  const connectedAccountId = session.payment_intent;
+  const amount = session.amount_total;
+
+  console.log(`Checkout session completed for amount ${amount} to account ${connectedAccountId}`);
+
+  // Example: Update database to mark the bid as paid
+  // await updateDatabaseForSuccessfulPayment(session);
+}
+
+async function handlePaymentIntentSucceeded(paymentIntent) {
+  console.log(`PaymentIntent for ${paymentIntent.amount} was successful!`);
+  // Implement logic to update your database and application state
+  // Example: Update database to reflect successful payment
+  // await updateDatabaseForSuccessfulPayment(paymentIntent);
+}
+
+async function handlePaymentIntentFailed(paymentIntent) {
+  console.error(`PaymentIntent for ${paymentIntent.amount} failed.`);
+  // Implement logic to handle a failed payment
+  // Example: Update database to reflect failed payment
+  // await updateDatabaseForFailedPayment(paymentIntent);
+}
+
 
 module.exports = app; // Export for Vercel
 
