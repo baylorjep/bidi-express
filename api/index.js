@@ -139,7 +139,7 @@ if (process.env.NODE_ENV !== 'production') {
 
 // Webhook for stripe
 // Your webhook secret from the Stripe Dashboard (calls on env file)
-const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
+const endpointSecret = process.env.STRIPE_WEBHOOK_TEST;
 
 
 // Webhook endpoint
