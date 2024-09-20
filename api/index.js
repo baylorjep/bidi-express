@@ -77,7 +77,15 @@ app.post("/account", async (req, res) => {
 // This is the endpoint to create a Checkout Session with destination charge
 app.post("/create-checkout-session", async (req, res) => {
   try {
-    const { connectedAccountId, amount, applicationFeeAmount } = req.body;
+    const { connectedAccountId, amount, applicationFeeAmount, serviceName } = req.body;
+
+    console.log("Request Body:", req.body); // Log the incoming request data
+
+    // Validate that the required fields are present
+    if (!connectedAccountId || !amount || !applicationFeeAmount || !serviceName) {
+      console.error("Missing required fields in request");
+      return res.status(400).send("Missing required fields");
+    }
 
     // Create a Checkout session
     const session = await stripe.checkout.sessions.create({
@@ -86,7 +94,7 @@ app.post("/create-checkout-session", async (req, res) => {
           price_data: {
             currency: 'usd',
             product_data: {
-              name: 'Photography Service', // Customize as needed
+              name: serviceName, 
             },
             unit_amount: amount, // Price in cents (e.g., 5000 for $50)
           },
