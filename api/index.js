@@ -145,10 +145,27 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 
+
+// Endpoint to check connected account capabilities
+app.get('/check-account-capabilities/:accountId', async (req, res) => {
+  const { accountId } = req.params;
+
+  try {
+    const account = await stripe.accounts.retrieve(accountId);
+    console.log(account.capabilities);
+
+    res.json({
+      capabilities: account.capabilities,
+    });
+  } catch (error) {
+    console.error('Error retrieving account:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Webhook for stripe
 // Your webhook secret from the Stripe Dashboard (calls on env file)
 const endpointSecret = process.env.STRIPE_WEBHOOK_TEST;
-
 
 // Webhook endpoint
 app.post('/webhook', bodyParser.raw({ type: 'application/json' }), (req, res) => {
