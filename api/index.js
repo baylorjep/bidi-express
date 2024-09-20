@@ -111,6 +111,8 @@ app.post("/create-checkout-session", async (req, res) => {
       success_url: 'https://www.savewithbidi.com/payment-successful', // Customize your success URL
       cancel_url: 'https://example.com/payment-cancelled',  // Customize your cancel URL
     });
+    
+    console.log("Checkout session created:", session); // Log the session data
 
     // Send the session ID back to the frontend
     res.json({ client_secret: session.client_secret });
