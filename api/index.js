@@ -110,6 +110,7 @@ app.post("/create-checkout-session", async (req, res) => {
       },
       mode: 'payment',
       ui_mode: 'embedded',
+      return_url: 'https://www.savewithbidi.com/payment-successful',
     });
 
     console.log("Checkout session created:", session); // Log the session data
