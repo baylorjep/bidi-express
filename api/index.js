@@ -109,6 +109,7 @@ app.post("/create-checkout-session", async (req, res) => {
         },
       },
       mode: 'payment',
+      ui_mode: 'embedded',
       success_url: 'https://www.savewithbidi.com/payment-successful', // Customize your success URL
       cancel_url: 'https://savewithbidi.com/payment-cancelled',  // Customize your cancel URL
     });
