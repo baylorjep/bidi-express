@@ -129,6 +129,23 @@ app.post("/create-checkout-session", async (req, res) => {
 // Serve static files only if the frontend is hosted from the same project
 // If you're hosting the frontend separately, you can remove this
 
+app.post('/check-payment-status', async (req, res) => {
+  const { paymentIntentId } = req.body;
+
+  try {
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    
+    if (paymentIntent.status === 'succeeded') {
+      res.json({ success: true });
+    } else {
+      res.json({ success: false });
+    }
+  } catch (error) {
+    console.error('Error checking payment status:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Create a login link for the connected account
 app.post("/create-login-link", async (req, res) => {
   const { accountId } = req.body; // The connected account ID
