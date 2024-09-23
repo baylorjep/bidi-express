@@ -107,6 +107,9 @@ app.post("/create-checkout-session", async (req, res) => {
         transfer_data: {
           destination: connectedAccountId, // Photographer's connected account ID
         },
+        metadata: {
+          bid_id: bidId, // Include bid_id here
+        },
       },
       mode: 'payment',
       ui_mode: 'embedded',
@@ -228,15 +231,29 @@ app.post('/webhook', bodyParser.raw({ type: 'application/json' }), (req, res) =>
 
 // Define functions to handle specific events
 async function handleCheckoutSessionCompleted(session) {
-  // Implement logic to update your database and application state
-  const connectedAccountId = session.payment_intent;
-  const amount = session.amount_total;
+  try {
+    // Implement logic to update your database and application state
+    const connectedAccountId = session.payment_intent;
+    const bidId = session.metadata.bid_id; // Assuming you passed bid_id as metadata
+    const amount = session.amount_total;
 
-  console.log(`Checkout session completed for amount ${amount} to account ${connectedAccountId}`);
+    console.log(`Checkout session completed for amount ${amount} to account ${connectedAccountId} for bidID ${bidId}`);
 
-  // Example: Update database to mark the bid as paid
-  // await updateDatabaseForSuccessfulPayment(session);
-}
+    // Update the bid status to 'paid' in your Supabase database
+    const { data, error } = await supabase
+      .from('bids')
+      .update({ status: 'paid' })
+      .eq('id', bidId);
+
+    if (error) {
+      console.error('Error updating bid status:', error.message);
+    } else {
+      console.log(`Bid ${bidId} status updated to 'paid'`);
+    }
+  } catch (error) {
+    console.error('Error in handleCheckoutSessionCompleted function:', error.message);
+  }
+  }
 
 async function handlePaymentIntentSucceeded(paymentIntent) {
   console.log(`PaymentIntent for ${paymentIntent.amount} was successful!`);
