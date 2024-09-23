@@ -107,9 +107,7 @@ app.post("/create-checkout-session", async (req, res) => {
         transfer_data: {
           destination: connectedAccountId, // Photographer's connected account ID
         },
-        metadata: {
-          bid_id: bidId, // Include bid_id here
-        },
+        
       },
       mode: 'payment',
       ui_mode: 'embedded',
