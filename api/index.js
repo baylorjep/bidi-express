@@ -76,15 +76,19 @@ app.post("/account", async (req, res) => {
 // This is the endpoint to create a Checkout Session with destination charge
 app.post("/create-checkout-session", async (req, res) => {
   try {
-    const { connectedAccountId, amount, applicationFeeAmount, serviceName } = req.body;
+    const { connectedAccountId, amount, serviceName } = req.body;
 
     console.log("Request Body:", req.body); // Log the incoming request data
 
     // Validate that the required fields are present
-    if (!connectedAccountId || !amount || !applicationFeeAmount || !serviceName) {
+    if (!connectedAccountId || !amount || !serviceName) {
       console.error("Missing required fields in request");
       return res.status(400).send("Missing required fields");
     }
+
+    // Calculate the 5% application fee from the business's portion
+    const applicationFeeAmount = Math.round(amount * 0.05); // 5% of the amount in cents
+
 
     // Create a Checkout session
     const session = await stripe.checkout.sessions.create({
@@ -104,7 +108,7 @@ app.post("/create-checkout-session", async (req, res) => {
       payment_intent_data: {
         application_fee_amount: applicationFeeAmount, // Fee amount in cents (e.g., 500 for $5)
         transfer_data: {
-          destination: connectedAccountId, // Photographer's connected account ID
+          destination: connectedAccountId, // businesses connected account ID
         },
         
       },
