@@ -226,7 +226,7 @@ app.post('/webhook', bodyParser.raw({ type: 'application/json' }), (req, res) =>
       console.warn(`Unhandled event type ${event.type}`);
   }
 
-  // Return a response to acknowledge receipt of the event
+  // Return a response to acknowledge receipt of the event()
   res.json({ received: true });
 });
 
