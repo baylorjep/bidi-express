@@ -189,7 +189,7 @@ app.get('/check-account-capabilities/:accountId', async (req, res) => {
 
 // Webhook for stripe
 // Your webhook secret from the Stripe Dashboard (calls on env file)
-const endpointSecret = process.env.STRIPE_WEBHOOK_TEST;
+const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
 // Webhook endpoint
 app.post('/webhook', bodyParser.raw({ type: 'application/json' }), (req, res) => {
