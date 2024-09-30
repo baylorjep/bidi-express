@@ -270,6 +270,22 @@ async function handlePaymentIntentFailed(paymentIntent) {
   // await updateDatabaseForFailedPayment(paymentIntent);
 }
 
+// Nodemailer SMTP/email setup
+
+const nodemailer = require('nodemailer');
+
+const transporter = nodemailer.createTransport({
+  host: 'smtp-relay.brevo.com', // Brevo SMTP server
+  port: 587, // SMTP port (use 465 for SSL)
+  secure: false, // true for 465, false for 587
+  auth: {
+    user: process.env.SMTP_USER, // Brevo SMTP username
+    pass: process.env.SMTP_PASS, // Brevo SMTP password
+  },
+});
+
+module.exports = transporter;
+
 
 module.exports = app; // Export for Vercel
 
