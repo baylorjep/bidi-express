@@ -284,7 +284,21 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-module.exports = transporter;
+async function sendEmail({ to, subject, text, html }) {
+  try {
+    const info = await transporter.sendMail({
+      from: '"Bidi" <no-reply@yourdomain.com>', // sender address
+      to, // list of receivers
+      subject, // Subject line
+      text, // plain text body
+      html, // html body
+    });
+
+    console.log('Message sent: %s', info.messageId);
+  } catch (error) {
+    console.error('Error sending email:', error);
+  }
+}
 
 
 module.exports = app; // Export for Vercel
