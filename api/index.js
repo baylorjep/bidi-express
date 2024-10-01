@@ -287,7 +287,7 @@ const transporter = nodemailer.createTransport({
 async function sendEmail({ to, subject, text, html }) {
   try {
     const info = await transporter.sendMail({
-      from: '"Bidi" <no-reply@yourdomain.com>', // sender address
+      from: '"Bidi" <savewithbidi@gmail.com>', // sender address
       to, // list of receivers
       subject, // Subject line
       text, // plain text body
