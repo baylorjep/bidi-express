@@ -272,33 +272,47 @@ async function handlePaymentIntentFailed(paymentIntent) {
 
 // Nodemailer SMTP/email setup
 
-const nodemailer = require('nodemailer');
+const SibApiV3Sdk = require('sib-api-v3-sdk');
 
-const transporter = nodemailer.createTransport({
-  host: 'smtp-relay.brevo.com', // Brevo SMTP server
-  port: 587, // SMTP port (use 465 for SSL)
-  secure: false, // true for 465, false for 587
-  auth: {
-    user: process.env.SMTP_USER, // Brevo SMTP username
-    pass: process.env.SMTP_PASS, // Brevo SMTP password
-  },
+
+// Initialize Brevo client
+const defaultClient = SibApiV3Sdk.ApiClient.instance;
+const apiKey = defaultClient.authentications['api-key'];
+apiKey.apiKey = process.env.BREVO_API_KEY; // Store your API key securely
+
+// Middleware
+app.use(bodyParser.json());
+
+
+// Function to send an email via Brevo
+const sendEmailNotification = async (recipientEmail, subject, htmlContent) => {
+    try {
+        const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
+        const sendSmtpEmail = new SibApiV3Sdk.SendSmtpEmail({
+            to: [{ email: recipientEmail }],
+            sender: { name: 'Bidi', email: 'savewithbidi@gmail.com' },
+            subject: subject,
+            htmlContent: htmlContent
+        });
+
+        const data = await apiInstance.sendTransacEmail(sendSmtpEmail);
+        console.log('API called successfully. Returned data: ' + data);
+    } catch (error) {
+        console.error('Error sending email:', error);
+    }
+};
+
+// Endpoint for sending email notifications
+app.post('/send-email', async (req, res) => {
+    const { recipientEmail, subject, htmlContent } = req.body;
+
+    try {
+        await sendEmailNotification(recipientEmail, subject, htmlContent);
+        res.status(200).send('Email sent successfully');
+    } catch (error) {
+        res.status(500).send('Error sending email: ' + error.message);
+    }
 });
-
-async function sendEmail({ to, subject, text, html }) {
-  try {
-    const info = await transporter.sendMail({
-      from: '"Bidi" <savewithbidi@gmail.com>', // sender address
-      to, // list of receivers
-      subject, // Subject line
-      text, // plain text body
-      html, // html body
-    });
-
-    console.log('Message sent: %s', info.messageId);
-  } catch (error) {
-    console.error('Error sending email:', error);
-  }
-}
 
 
 module.exports = app; // Export for Vercel
