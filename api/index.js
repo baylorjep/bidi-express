@@ -1,5 +1,5 @@
 const express = require("express");
-const cors = require("cors"); // Import CORS
+const cors = require("cors"); // Import CORS  
 const bodyParser = require('body-parser');
 
 const app = express();
@@ -314,6 +314,65 @@ app.post('/send-email', async (req, res) => {
     }
 });
 
+app.post('/create-plus-checkout-session', async (req, res) => {
+  const { userId } = req.body; // Pass the user ID from the frontend
+
+  if (!userId) {
+      return res.status(400).json({ error: 'User ID is required' });
+  }
+
+  try {
+      // Create a Stripe Checkout session
+      const session = await stripe.checkout.sessions.create({
+          payment_method_types: ['card'],
+          mode: 'subscription',
+          line_items: [
+              {
+                  price: 'price_1QNIzyF25aBU3RMPEpbxhWN7', // Your Stripe Price ID
+                  quantity: 1,
+              },
+          ],
+          customer_email: req.body.email, // Optional if you want to link it to an email
+          metadata: {
+              userId, // Pass the userId as metadata for the webhook
+          },
+          success_url: 'https://www.savewithbidi.com/success?session_id={CHECKOUT_SESSION_ID}',
+          cancel_url: 'https://www.savewithbidi.com/cancel',
+      });
+
+      // Return the session URL
+      res.json({ url: session.url });
+  } catch (error) {
+      console.error('Error creating checkout session:', error.message);
+      res.status(500).json({ error: error.message });
+  }
+});
+
+
+const twilio = require('twilio');
+const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+
+app.post('/send-sms', async (req, res) => {
+  const {to, message} = req.body;
+
+  if (!to || !message) {
+    return res.status(400).json({ error: 'Recipient phone number and message are required.' });
+  }
+
+  try {
+    const response = await twilioClient.messages.create({
+      body: message,
+      from: process.env.TWILIO_PHONE_NUMBER,
+      to: to,
+    });
+    console.log('SMS sent: ${response.sid}');
+    res.status(200).json({ success: true, sid: response.sid });
+  }
+  catch (error) {
+    console.error('Error sending SMS:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 module.exports = app; // Export for Vercel
 
