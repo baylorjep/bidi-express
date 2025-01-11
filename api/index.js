@@ -380,8 +380,12 @@ app.post('/send-sms', async (req, res) => {
 app.post('/send-email-notification', async (req, res) => {
   const { recipientEmails, subject, htmlContent, textContent = '' } = req.body;
 
+  console.log('Incoming email request:', { recipientEmails, subject });
+
+
   // Validate input
   if (!recipientEmails || !Array.isArray(recipientEmails) || recipientEmails.length === 0) {
+    console.error('Invalid recipientEmails:', recipientEmails);
     return res.status(400).json({ error: 'Recipient emails must be provided as a non-empty array.' });
   }
   if (!subject || !htmlContent) {
@@ -399,6 +403,7 @@ app.post('/send-email-notification', async (req, res) => {
 
   try {
     // Send the email
+    console.log('Sending email with message:', msg);
     await sgMail.send(msg);
     console.log('Email sent to recipients:', recipientEmails);
     res.status(200).json({ message: 'Emails sent successfully.' });
