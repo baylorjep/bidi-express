@@ -1,10 +1,11 @@
 const express = require("express");
 const cors = require("cors"); // Import CORS  
 const bodyParser = require('body-parser');
-
 const app = express();
+const sgMail = require('@sendgrid/mail');
 
-
+// Set the SendGrid API Key
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 // Set your Stripe secret key. Remember to switch to your live secret key in production.
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY,
@@ -348,7 +349,7 @@ app.post('/create-plus-checkout-session', async (req, res) => {
   }
 });
 
-
+// twillio api work
 const twilio = require('twilio');
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
@@ -373,6 +374,29 @@ app.post('/send-sms', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// sendgrid api
+
+
+// Endpoint for sending emails using SendGrid
+
+  const msg = {
+    to: 'baylorjeppsen@gmail.com', // Change to your recipient
+    from: 'noreply@savewithbidi.com', // Change to your verified sender
+    subject: 'Sending with SendGrid is Fun',
+    text: 'and easy to do anywhere, even with Node.js',
+    html: '<strong>and easy to do anywhere, even with Node.js</strong>',
+  }
+
+  sgMail
+  .send(msg)
+  .then(() => {
+    console.log('Email sent');
+  })
+  .catch((error) => {
+    console.error('Error sending email:', error);
+  });
+
 
 module.exports = app; // Export for Vercel
 
