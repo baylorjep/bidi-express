@@ -377,25 +377,36 @@ app.post('/send-sms', async (req, res) => {
 
 // sendgrid api
 
+app.post('/send-email-notification', async (req, res) => {
+  const { recipientEmails, subject, htmlContent, textContent = '' } = req.body;
 
-// Endpoint for sending emails using SendGrid
-
-  const msg = {
-    to: 'baylorjeppsen@gmail.com', // Change to your recipient
-    from: 'noreply@savewithbidi.com', // Change to your verified sender
-    subject: 'Sending with SendGrid is Fun',
-    text: 'and easy to do anywhere, even with Node.js',
-    html: '<strong>and easy to do anywhere, even with Node.js</strong>',
+  // Validate input
+  if (!recipientEmails || !Array.isArray(recipientEmails) || recipientEmails.length === 0) {
+    return res.status(400).json({ error: 'Recipient emails must be provided as a non-empty array.' });
+  }
+  if (!subject || !htmlContent) {
+    return res.status(400).json({ error: 'Subject and HTML content are required.' });
   }
 
-  sgMail
-  .send(msg)
-  .then(() => {
-    console.log('Email sent');
-  })
-  .catch((error) => {
-    console.error('Error sending email:', error);
-  });
+  const msg = {
+    to: 'savewithbidi@gmail.com', // Required for SendGrid
+    bcc: recipientEmails, // Add recipients as BCC
+    from: { email: 'noreply@savewithbidi.com', name: 'Bidi Support' },
+    subject: subject,
+    text: textContent,
+    html: htmlContent,
+  };
+
+  try {
+    // Send the email
+    await sgMail.send(msg);
+    console.log('Email sent to recipients:', recipientEmails);
+    res.status(200).json({ message: 'Emails sent successfully.' });
+  } catch (error) {
+    console.error('Error sending email:', error.response ? error.response.body : error.message);
+    res.status(500).json({ error: 'Failed to send emails.' });
+  }
+});
 
 
 module.exports = app; // Export for Vercel
