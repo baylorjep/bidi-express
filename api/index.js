@@ -16,7 +16,7 @@ const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY,
 
 // Enable CORS with the frontend's URL to allow api requests from the site
 app.use(cors({
-  origin: 'https://www.savewithbidi.com', // Replace with your actual frontend URL
+  origin: ['https://www.savewithbidi.com', 'http://localhost:3000'], // Replace with your actual frontend URL
   methods: ['GET', 'POST'], // Specify allowed methods
   credentials: true, // If needed (e.g., for cookies)
 }));
