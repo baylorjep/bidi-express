@@ -2,9 +2,11 @@ const express = require("express");
 const cors = require("cors"); 
 const bodyParser = require('body-parser');
 const app = express();
+const { Resend } = require('resend');
 
 // Initialize Resend with the API key
 const resend = new Resend(process.env.RESEND_API_KEY);
+
 
 // Set your Stripe secret key. Remember to switch to your live secret key in production.
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY,
@@ -350,6 +352,8 @@ app.post('/create-plus-checkout-session', async (req, res) => {
 
 
 // Resend email endpoint
+
+
 app.post('/send-resend-email', async (req, res) => {
   const { recipientEmail, subject, htmlContent } = req.body;
 
