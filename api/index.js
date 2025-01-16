@@ -24,7 +24,6 @@ app.use(cors({
 
 app.use(express.json());
 
-
 // basic page
 
 app.get("/", (req, res) => res.send("Bidi Express on Vercel"));
