@@ -364,7 +364,7 @@ app.post('/send-resend-email', async (req, res) => {
   try {
     // Use Resend to send an email
     const response = await resend.emails.send({
-      from: 'onboarding@resend.dev', // Replace with your verified sender email
+      from: 'noreply@savewithbidi.com', // Replace with your verified sender email
       to: recipientEmail,
       subject,
       html: htmlContent,
