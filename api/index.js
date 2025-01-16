@@ -1,15 +1,10 @@
-import { sendEmail } from './emailService.js'; // Adjust path as needed
-
-
 const express = require("express");
-const cors = require("cors"); // Import CORS  
+const cors = require("cors"); 
 const bodyParser = require('body-parser');
 const app = express();
-const sgMail = require('@sendgrid/mail');
 
-
-// Set the SendGrid API Key
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+// Initialize Resend with the API key
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Set your Stripe secret key. Remember to switch to your live secret key in production.
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY,
@@ -353,84 +348,30 @@ app.post('/create-plus-checkout-session', async (req, res) => {
   }
 });
 
-// twillio api work
-const twilio = require('twilio');
-const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-
-app.post('/send-sms', async (req, res) => {
-  const {to, message} = req.body;
-
-  if (!to || !message) {
-    return res.status(400).json({ error: 'Recipient phone number and message are required.' });
-  }
-
-  try {
-    const response = await twilioClient.messages.create({
-      body: message,
-      from: process.env.TWILIO_PHONE_NUMBER,
-      to: to,
-    });
-    console.log('SMS sent: ${response.sid}');
-    res.status(200).json({ success: true, sid: response.sid });
-  }
-  catch (error) {
-    console.error('Error sending SMS:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// sendgrid api
-
-app.post('/send-email-notification', async (req, res) => {
-  const { recipientEmails, subject, htmlContent, textContent = '' } = req.body;
-
-  console.log('Incoming email request:', { recipientEmails, subject });
-
-
-  // Validate input
-  if (!recipientEmails || !Array.isArray(recipientEmails) || recipientEmails.length === 0) {
-    console.error('Invalid recipientEmails:', recipientEmails);
-    return res.status(400).json({ error: 'Recipient emails must be provided as a non-empty array.' });
-  }
-  if (!subject || !htmlContent) {
-    return res.status(400).json({ error: 'Subject and HTML content are required.' });
-  }
-
-  const msg = {
-    to: 'savewithbidi@gmail.com', // Required for SendGrid
-    bcc: recipientEmails, // Add recipients as BCC
-    from: { email: 'noreply@savewithbidi.com', name: 'Bidi Support' },
-    subject: subject,
-    text: textContent,
-    html: htmlContent,
-  };
-
-  try {
-    // Send the email
-    console.log('Sending email with message:', msg);
-    await sgMail.send(msg);
-    console.log('Email sent to recipients:', recipientEmails);
-    res.status(200).json({ message: 'Emails sent successfully.' });
-  } catch (error) {
-    console.error('Error sending email:', error.response ? error.response.body : error.message);
-    res.status(500).json({ error: 'Failed to send emails.' });
-  }
-});
-
 
 // Resend email endpoint
 app.post('/send-resend-email', async (req, res) => {
   const { recipientEmail, subject, htmlContent } = req.body;
 
+  // Validate input
   if (!recipientEmail || !subject || !htmlContent) {
-    return res.status(400).json({ error: 'Missing required fields: recipientEmail, subject, or htmlContent.' });
+    return res.status(400).json({ error: "Missing required fields: recipientEmail, subject, or htmlContent." });
   }
 
   try {
-    const response = await sendEmail(recipientEmail, subject, htmlContent);
-    res.status(200).json({ message: 'Email sent successfully.', response });
+    // Use Resend to send an email
+    const response = await resend.emails.send({
+      from: 'onboarding@resend.dev', // Replace with your verified sender email
+      to: recipientEmail,
+      subject,
+      html: htmlContent,
+    });
+
+    console.log("Email sent successfully:", response);
+    res.status(200).json({ message: "Email sent successfully.", response });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to send email.', details: error.message });
+    console.error("Error sending email with Resend:", error);
+    res.status(500).json({ error: "Failed to send email.", details: error.message });
   }
 });
 
