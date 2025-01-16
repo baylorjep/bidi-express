@@ -1,8 +1,12 @@
+import { sendEmail } from './emailService.js'; // Adjust path as needed
+
+
 const express = require("express");
 const cors = require("cors"); // Import CORS  
 const bodyParser = require('body-parser');
 const app = express();
 const sgMail = require('@sendgrid/mail');
+
 
 // Set the SendGrid API Key
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
@@ -413,6 +417,22 @@ app.post('/send-email-notification', async (req, res) => {
   }
 });
 
+
+// Resend email endpoint
+app.post('/send-resend-email', async (req, res) => {
+  const { recipientEmail, subject, htmlContent } = req.body;
+
+  if (!recipientEmail || !subject || !htmlContent) {
+    return res.status(400).json({ error: 'Missing required fields: recipientEmail, subject, or htmlContent.' });
+  }
+
+  try {
+    const response = await sendEmail(recipientEmail, subject, htmlContent);
+    res.status(200).json({ message: 'Email sent successfully.', response });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to send email.', details: error.message });
+  }
+});
 
 module.exports = app; // Export for Vercel
 
