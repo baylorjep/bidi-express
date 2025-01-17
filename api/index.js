@@ -354,7 +354,7 @@ app.post('/create-plus-checkout-session', async (req, res) => {
 
 
 app.post('/send-resend-email', async (req, res) => {
-  const { recipientEmail, subject, htmlContent } = req.body;
+  const { recipientEmail, subject, htmlContent, bccEmails } = req.body;
 
   // Validate input
   if (!recipientEmail || !subject || !htmlContent) {
@@ -368,6 +368,7 @@ app.post('/send-resend-email', async (req, res) => {
       to: recipientEmail,
       subject,
       html: htmlContent,
+      bcc: bccEmails || [], // Add BCC recipients if provided
     });
 
     console.log("Email sent successfully:", response);
