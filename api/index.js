@@ -360,73 +360,28 @@ app.post('/create-plus-checkout-session', async (req, res) => {
 // Resend email endpoint
 
 app.post('/send-resend-email', async (req, res) => {
-  const { category } = req.body; // Pass the category from the frontend (e.g., "Photographer")
+  const { recipientEmail, subject, htmlContent, bccEmails } = req.body;
 
   // Validate input
-  if (!category) {
-    return res.status(400).json({ error: "Missing required field: category." });
+  if (!recipientEmail || !subject || !htmlContent) {
+    return res.status(400).json({ error: "Missing required fields: recipientEmail, subject, or htmlContent." });
   }
 
   try {
-    // Fetch user IDs and emails for the specified category
-    const { data: users, error: usersError } = await supabase
-      .from('business_profiles') // Table with business categories
-      .select('id') // Get the user IDs that match the category
-      .eq('business_category', category);
-
-    if (usersError) {
-      console.error("Error fetching users in the category:", usersError.message);
-      return res.status(500).json({ error: "Failed to fetch users in the category." });
-    }
-
-    if (!users || users.length === 0) {
-      return res.status(404).json({ error: "No users found in the specified category." });
-    }
-
-    // Extract IDs from business_profiles and fetch emails from profiles
-    const userIds = users.map(user => user.id);
-
-    const { data: emails, error: emailsError } = await supabase
-      .from('profiles') // Table with emails
-      .select('email')
-      .in('id', userIds); // Match only the user IDs from business_profiles
-
-    if (emailsError) {
-      console.error("Error fetching emails for users:", emailsError.message);
-      return res.status(500).json({ error: "Failed to fetch emails for users." });
-    }
-
-    if (!emails || emails.length === 0) {
-      return res.status(404).json({ error: "No emails found for users in the specified category." });
-    }
-
-    // Send email to each user
-    const sendEmailPromises = emails.map(async ({ email }) => {
-      const subject = `Exciting News for ${category}!`;
-      const htmlContent = `
-        <p>Hi there,</p>
-        <p>We have some exciting updates tailored for our ${category} partners!</p>
-        <p>Log in to your Bidi dashboard to learn more.</p>
-        <p>Best,</p>
-        <p>The Bidi Team</p>
-      `;
-
-      return resend.emails.send({
-        from: 'noreply@savewithbidi.com', // Replace with your verified sender email
-        to: email,
-        subject,
-        html: htmlContent,
-      });
+    // Use Resend to send an email
+    const response = await resend.emails.send({
+      from: 'noreply@savewithbidi.com', // Replace with your verified sender email
+      to: recipientEmail,
+      subject,
+      html: htmlContent,
+      bcc: bccEmails || [], // Add BCC recipients if provided
     });
 
-    // Await all email-sending promises
-    await Promise.all(sendEmailPromises);
-
-    console.log(`Emails sent successfully to category: ${category}`);
-    res.status(200).json({ message: `Emails sent successfully to all ${category} users.` });
+    console.log("Email sent successfully:", response);
+    res.status(200).json({ message: "Email sent successfully.", response });
   } catch (error) {
-    console.error("Error sending emails:", error.message);
-    res.status(500).json({ error: "Failed to send emails.", details: error.message });
+    console.error("Error sending email with Resend:", error);
+    res.status(500).json({ error: "Failed to send email.", details: error.message });
   }
 });
 
