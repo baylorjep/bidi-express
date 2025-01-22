@@ -6,8 +6,8 @@ const { Resend } = require('resend');
 const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(
-  process.env.supabaseUrl, // Replace with your Supabase URL
-  process.env.supabaseKey // Use your Service Role Key
+  process.env.SUPABASE_URL, // Replace with your Supabase URL
+  process.env.SUPABASE_KEY // Use your Service Role Key
 );
 
 
