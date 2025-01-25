@@ -367,7 +367,7 @@ app.post('/send-resend-email', async (req, res) => {
     const { data: users, error: usersError } = await supabase
       .from('business_profiles') // Table with business categories
       .select('id') // Fetch only user IDs
-      .eq('business_category', category);
+      .eq('business_category', 'ilike', category);
 
     if (usersError) {
       console.error("Error fetching users by category:", usersError.message);
@@ -398,10 +398,10 @@ app.post('/send-resend-email', async (req, res) => {
 
     // Send emails to all users
     const sendEmailPromises = emails.map(async ({ email }) => {
-      const subject = `Exciting News for ${category}!`;
+      const subject = `You have a new ${category} request on Bidi!`;
       const htmlContent = `
-        <p>Hi there,</p>
-        <p>We have some exciting updates tailored for our ${category} partners!</p>
+        <p>Hey there!</p>
+        <p>You have 1 new ${category} request to view on Bidi!</p>
         <p>Log in to your Bidi dashboard to learn more.</p>
         <p>Best,</p>
         <p>The Bidi Team</p>
