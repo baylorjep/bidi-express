@@ -403,6 +403,7 @@ app.post('/send-resend-email', async (req, res) => {
         <p>Hey there!</p>
         <p>You have 1 new ${category} request to view on Bidi!</p>
         <p>Log in to your Bidi dashboard to learn more.</p>
+        <p><a href="https://www.savewithbidi.com/open-requests" target="_blank" style="color: #007BFF; text-decoration: none;">Click here to view the request!</a></p>
         <p>Best,</p>
         <p>The Bidi Team</p>
       `;
