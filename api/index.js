@@ -367,7 +367,7 @@ app.post('/send-resend-email', async (req, res) => {
     const { data: users, error: usersError } = await supabase
       .from('business_profiles') // Table with business categories
       .select('id') // Fetch only user IDs
-      .eq('business_category', 'ilike', category);
+      .eq('business_category', category);
 
     if (usersError) {
       console.error("Error fetching users by category:", usersError.message);
