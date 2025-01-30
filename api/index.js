@@ -397,15 +397,13 @@ app.post('/send-resend-email', async (req, res) => {
     }
     console.log("Emails retrieved from profiles:", emails);
 
-    const validEmails = emails.map(e => e.email).filter(email => email); // Ensure no null values
+    const validEmails = [...new Set(emails.map(e => e.email).filter(email => email))];
 
     console.log(`📩 Sending emails to ${validEmails.length} users in category: ${category}`);
 
     // **Batch Processing to Avoid Rate Limit**
     const batchSize = 2; // Resend allows 2 requests per second
-    let batchIndex = 0;
-
-    while (batchIndex < validEmails.length) {
+    for (let batchIndex = 0; batchIndex < validEmails.length; batchIndex += batchSize) {
       const batch = validEmails.slice(batchIndex, batchIndex + batchSize);
 
       await Promise.all(
@@ -438,7 +436,7 @@ app.post('/send-resend-email', async (req, res) => {
 
       if (batchIndex < validEmails.length) {
         console.log(`⏳ Waiting 1 second before sending next batch...`);
-        await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait 1 second before next batch
+        await new Promise((resolve) => setTimeout(resolve, 1200)); // Wait 1 second before next batch
       }
     }
 
