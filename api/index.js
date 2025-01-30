@@ -355,9 +355,8 @@ app.post('/create-plus-checkout-session', async (req, res) => {
 // Resend email endpoint
 
 app.post('/send-resend-email', async (req, res) => {
-  const { category } = req.body; // Expecting the business category from the frontend
+  const { category } = req.body;
 
-  // Validate input
   if (!category) {
     return res.status(400).json({ error: "Missing required field: category." });
   }
@@ -365,8 +364,8 @@ app.post('/send-resend-email', async (req, res) => {
   try {
     // Fetch user IDs matching the category from `business_profiles`
     const { data: users, error: usersError } = await supabase
-      .from('business_profiles') // Table with business categories
-      .select('id') // Fetch only user IDs
+      .from('business_profiles')
+      .select('id')
       .eq('business_category', category);
 
     if (usersError) {
@@ -384,9 +383,9 @@ app.post('/send-resend-email', async (req, res) => {
 
     // Fetch emails for these user IDs from the `profiles` table
     const { data: emails, error: emailsError } = await supabase
-      .from('profiles') // Table with emails
-      .select('email') // Fetch only email field
-      .in('id', userIds); // Match user IDs
+      .from('profiles')
+      .select('email')
+      .in('id', userIds);
 
     if (emailsError) {
       console.error("Error fetching emails:", emailsError.message);
@@ -398,31 +397,54 @@ app.post('/send-resend-email', async (req, res) => {
     }
     console.log("Emails retrieved from profiles:", emails);
 
-    // Send emails to all users
-    const sendEmailPromises = emails.map(async ({ email }) => {
-      const subject = `You have a new ${category} request on Bidi!`;
-      const htmlContent = `
-        <p>Hey there!</p>
-        <p>You have 1 new ${category} request to view on Bidi!</p>
-        <p>Log in to your Bidi dashboard to learn more.</p>
-        <p><a href="https://www.savewithbidi.com/open-requests" target="_blank" style="color: #007BFF; text-decoration: none;">Click here to view the request!</a></p>
-        <p>Best,</p>
-        <p>The Bidi Team</p>
-      `;
+    const validEmails = emails.map(e => e.email).filter(email => email); // Ensure no null values
 
-      return resend.emails.send({
-        from: 'noreply@savewithbidi.com', 
-        to: email,
-        subject,
-        html: htmlContent,
-      });
-    });
+    console.log(`📩 Sending emails to ${validEmails.length} users in category: ${category}`);
 
-    // Await all email-sending promises
-    await Promise.all(sendEmailPromises);
+    // **Batch Processing to Avoid Rate Limit**
+    const batchSize = 2; // Resend allows 2 requests per second
+    let batchIndex = 0;
 
-    console.log(`Emails sent successfully to category: ${category}`);
+    while (batchIndex < validEmails.length) {
+      const batch = validEmails.slice(batchIndex, batchIndex + batchSize);
+
+      await Promise.all(
+        batch.map(async (email) => {
+          const subject = `You have a new ${category} request on Bidi!`;
+          const htmlContent = `
+            <p>Hey there!</p>
+            <p>You have 1 new ${category} request to view on Bidi!</p>
+            <p>Log in to your Bidi dashboard to learn more.</p>
+            <p><a href="https://www.savewithbidi.com/open-requests" target="_blank" style="color: #007BFF; text-decoration: none;">Click here to view the request!</a></p>
+            <p>Best,</p>
+            <p>The Bidi Team</p>
+          `;
+
+          try {
+            await resend.emails.send({
+              from: 'noreply@savewithbidi.com',
+              to: email,
+              subject,
+              html: htmlContent,
+            });
+            console.log(`✅ Email sent to: ${email}`);
+          } catch (emailError) {
+            console.error(`❌ Failed to send email to ${email}:`, emailError.message);
+          }
+        })
+      );
+
+      batchIndex += batchSize;
+
+      if (batchIndex < validEmails.length) {
+        console.log(`⏳ Waiting 1 second before sending next batch...`);
+        await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait 1 second before next batch
+      }
+    }
+
+    console.log(`✅ All emails sent successfully for category: ${category}`);
     res.status(200).json({ message: `Emails sent successfully to all users in category: ${category}.` });
+
   } catch (error) {
     console.error("Error sending emails:", error.message);
     res.status(500).json({ error: "Failed to send emails.", details: error.message });
