@@ -377,6 +377,7 @@ app.post('/send-resend-email', async (req, res) => {
     if (!users || users.length === 0) {
       return res.status(404).json({ error: `No users found in category: ${category}.` });
     }
+    console.log(`Users retrieved from business_profiles:`, users.map(u => u.id));
 
     // Extract user IDs
     const userIds = users.map(user => user.id);
@@ -395,6 +396,7 @@ app.post('/send-resend-email', async (req, res) => {
     if (!emails || emails.length === 0) {
       return res.status(404).json({ error: `No emails found for users in category: ${category}.` });
     }
+    console.log("Emails retrieved from profiles:", emails);
 
     // Send emails to all users
     const sendEmailPromises = emails.map(async ({ email }) => {
@@ -409,7 +411,7 @@ app.post('/send-resend-email', async (req, res) => {
       `;
 
       return resend.emails.send({
-        from: 'noreply@savewithbidi.com', // Replace with your verified sender email
+        from: 'noreply@savewithbidi.com', 
         to: email,
         subject,
         html: htmlContent,
