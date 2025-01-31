@@ -436,7 +436,7 @@ app.post('/send-resend-email', async (req, res) => {
 
       if (batchIndex < validEmails.length) {
         console.log(`⏳ Waiting 1 second before sending next batch...`);
-        await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait 1 second before next batch
+        await new Promise((resolve) => setTimeout(resolve, 1500)); // Wait 1 second before next batch
       }
     }
 
