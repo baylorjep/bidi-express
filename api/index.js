@@ -451,6 +451,87 @@ app.post('/send-resend-email', async (req, res) => {
   }
 });
 
+//Bid Notifications
+
+app.post('/send-bid-notification', async (req, res) => {
+  const { requestId, businessId, price, description } = req.body;
+
+  if (!requestId || !businessId || !price || !description) {
+    return res.status(400).json({ error: "Missing required fields." });
+  }
+
+  try {
+    // Fetch the request details to get the user who created it
+    const { data: requestData, error: requestError } = await supabase
+      .from('requests')
+      .select('user_id, title')
+      .eq('id', requestId)
+      .single();
+
+    if (requestError) {
+      console.error("Error fetching request:", requestError.message);
+      return res.status(500).json({ error: "Failed to fetch request details." });
+    }
+
+    // Fetch the user's email from individual_profiles
+    const { data: userData, error: userError } = await supabase
+      .from('individual_profiles')
+      .select('email')
+      .eq('id', requestData.user_id)
+      .single();
+
+    if (userError) {
+      console.error("Error fetching user email:", userError.message);
+      return res.status(500).json({ error: "Failed to fetch user email." });
+    }
+
+    if (!userData?.email) {
+      return res.status(404).json({ error: "User email not found." });
+    }
+
+    console.log(`📩 Sending bid notification to ${userData.email}`);
+
+    // Fetch the business name
+    const { data: businessData, error: businessError } = await supabase
+      .from('business_profiles')
+      .select('business_name')
+      .eq('id', businessId)
+      .single();
+
+    if (businessError) {
+      console.error("Error fetching business name:", businessError.message);
+      return res.status(500).json({ error: "Failed to fetch business name." });
+    }
+
+    // Email content
+    const subject = `New Bid on Your Request: ${requestData.title}`;
+    const htmlContent = `
+      <p>Hey there!</p>
+      <p>A business has placed a bid on your request: <strong>${requestData.title}</strong>.</p>
+      <p><strong>${businessData.business_name}</strong> offered <strong>$${price}</strong>.</p>
+      <p>Description: ${description}</p>
+      <p><a href="https://www.savewithbidi.com/bids}" target="_blank" style="color: #007BFF; text-decoration: none;">Click here to view!</a></p>
+      <p>Best,</p>
+      <p>The Bidi Team</p>
+    `;
+
+    // Send email
+    await resend.emails.send({
+      from: 'noreply@savewithbidi.com',
+      to: userData.email,
+      subject,
+      html: htmlContent,
+    });
+
+    console.log(`✅ Bid notification email sent to: ${userData.email}`);
+    res.status(200).json({ message: "Bid notification email sent successfully." });
+
+  } catch (error) {
+    console.error("Error sending bid notification email:", error.message);
+    res.status(500).json({ error: "Failed to send email.", details: error.message });
+  }
+});
+
 module.exports = app; // Export for Vercel
 
 
