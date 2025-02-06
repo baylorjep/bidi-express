@@ -454,81 +454,82 @@ app.post('/send-resend-email', async (req, res) => {
 //Bid Notifications
 
 app.post('/send-bid-notification', async (req, res) => {
-  const { requestId, businessId, price, description } = req.body;
+  const { requestId } = req.body;
 
-  if (!requestId || !businessId || !price || !description) {
-    return res.status(400).json({ error: "Missing required fields." });
+  if (!requestId) {
+    return res.status(400).json({ error: "Missing required field: requestId." });
   }
 
   try {
-    // Fetch the request details to get the user who created it
-    const { data: requestData, error: requestError } = await supabase
-      .from('requests')
-      .select('user_id, title')
+    console.log(`🔍 Looking up request owner for request ID: ${requestId}`);
+
+    // First, check the `photography_requests` table
+    let { data: requestOwner, error: photoError } = await supabase
+      .from('photography_requests')
+      .select('profile_id')
       .eq('id', requestId)
       .single();
 
-    if (requestError) {
-      console.error("Error fetching request:", requestError.message);
-      return res.status(500).json({ error: "Failed to fetch request details." });
+    if (!requestOwner || photoError) {
+      console.log(`❌ Not found in photography_requests. Checking requests table...`);
+
+      // If not found, check `requests` table
+      const { data: generalRequestOwner, error: requestError } = await supabase
+        .from('requests')
+        .select('user_id')
+        .eq('id', requestId)
+        .single();
+
+      if (requestError || !generalRequestOwner) {
+        console.error(`❌ No matching request found for request ID: ${requestId}`);
+        return res.status(404).json({ error: "No matching request found." });
+      }
+
+      requestOwner = { profile_id: generalRequestOwner.user_id };
     }
 
-    // Fetch the user's email from individual_profiles
-    const { data: userData, error: userError } = await supabase
-      .from('individual_profiles')
+    console.log(`✅ Found request owner: ${requestOwner.profile_id}`);
+
+    // Fetch user email from `profiles`
+    const { data: userProfile, error: profileError } = await supabase
+      .from('profiles')
       .select('email')
-      .eq('id', requestData.user_id)
+      .eq('id', requestOwner.profile_id)
       .single();
 
-    if (userError) {
-      console.error("Error fetching user email:", userError.message);
-      return res.status(500).json({ error: "Failed to fetch user email." });
+    if (profileError || !userProfile?.email) {
+      console.error("❌ Failed to retrieve user email:", profileError);
+      return res.status(500).json({ error: "Failed to retrieve user email." });
     }
 
-    if (!userData?.email) {
-      return res.status(404).json({ error: "User email not found." });
-    }
+    const recipientEmail = userProfile.email;
+    console.log(`📩 Sending email to: ${recipientEmail}`);
 
-    console.log(`📩 Sending bid notification to ${userData.email}`);
-
-    // Fetch the business name
-    const { data: businessData, error: businessError } = await supabase
-      .from('business_profiles')
-      .select('business_name')
-      .eq('id', businessId)
-      .single();
-
-    if (businessError) {
-      console.error("Error fetching business name:", businessError.message);
-      return res.status(500).json({ error: "Failed to fetch business name." });
-    }
-
-    // Email content
-    const subject = `New Bid on Your Request: ${requestData.title}`;
+    // Construct email content
+    const subject = "You received a new bid on Bidi!";
     const htmlContent = `
       <p>Hey there!</p>
-      <p>A business has placed a bid on your request: <strong>${requestData.title}</strong>.</p>
-      <p><strong>${businessData.business_name}</strong> offered <strong>$${price}</strong>.</p>
-      <p>Description: ${description}</p>
-      <p><a href="https://www.savewithbidi.com/bids}" target="_blank" style="color: #007BFF; text-decoration: none;">Click here to view!</a></p>
+      <p>Someone just placed a bid on your request.</p>
+      <p>Click below to review the bid:</p>
+      <p><a href="https://www.savewithbidi.com/my-bids" target="_blank" style="color: #007BFF; text-decoration: none;">View Your Bids</a></p>
       <p>Best,</p>
       <p>The Bidi Team</p>
     `;
 
-    // Send email
+    // Send email using Resend
     await resend.emails.send({
       from: 'noreply@savewithbidi.com',
-      to: userData.email,
+      to: recipientEmail,
       subject,
       html: htmlContent,
     });
 
-    console.log(`✅ Bid notification email sent to: ${userData.email}`);
-    res.status(200).json({ message: "Bid notification email sent successfully." });
+    console.log(`✅ Email sent successfully to: ${recipientEmail}`);
+    res.status(200).json({ message: "Email sent successfully." });
 
   } catch (error) {
-    console.error("Error sending bid notification email:", error.message);
-    res.status(500).json({ error: "Failed to send email.", details: error.message });
+    console.error("❌ Error sending email notification:", error.message);
+    res.status(500).json({ error: "Failed to send email notification.", details: error.message });
   }
 });
 
