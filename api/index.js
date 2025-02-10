@@ -533,6 +533,32 @@ app.post('/send-bid-notification', async (req, res) => {
   }
 });
 
+// Messaging API - Send a message
+app.post("/send-message", async (req, res) => {
+  const { senderId, receiverId, message } = req.body;
+
+  if (!senderId || !receiverId || !message) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  try {
+    const { data, error } = await supabase.from("messages").insert([
+      { sender_id: senderId, receiver_id: receiverId, message },
+    ]);
+
+    if (error) {
+      console.error("Error sending message:", error);
+      return res.status(500).json({ error: "Failed to send message" });
+    }
+
+    res.status(201).json({ message: "Message sent successfully!", data });
+  } catch (err) {
+    console.error("Server error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
 module.exports = app; // Export for Vercel
 
 
