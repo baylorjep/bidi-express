@@ -1,11 +1,23 @@
+// express declarations
 const express = require("express");
-const cors = require("cors"); 
-const bodyParser = require('body-parser');
 const app = express();
+
+// cors for cross origin resource sharing
+const cors = require("cors"); 
+
+// body parser for parsing request bodies
+const bodyParser = require('body-parser');
+
+// Resend declaration for emailing
 const { Resend } = require('resend');
+
+// supabase declaration for dbm
 const supabase = require('./supabaseClient');
+
+// OpenAI declaration for AI
 const OpenAI = require("openai");
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const { generateAutoBidForBusiness } = require('./Autobid');
 
 // Initialize Resend with the API key
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -17,6 +29,60 @@ const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY,
     apiVersion: "2023-10-16",
   }
 );
+
+// Supabase Realtime: Listen for new requests
+const listenForNewRequests = async () => {
+  console.log("📡 Listening for new job requests...");
+
+  supabase
+      .channel("new-requests")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "requests" }, async (payload) => {
+          console.log("🆕 New request detected:", payload.new);
+
+          const newRequest = payload.new;
+
+          // Step 1: Find businesses with Auto-Bidding enabled
+          const { data: autoBidBusinesses, error: businessError } = await supabase
+              .from("business_profiles")
+              .select("id, autobid_enabled")
+              .eq("autobid_enabled", true);
+
+          if (businessError) {
+              console.error("❌ Error fetching businesses:", businessError.message);
+              return;
+          }
+
+          console.log(`🔍 Found ${autoBidBusinesses.length} businesses with Auto-Bidding enabled.`);
+
+          // Step 2: Trigger AI auto-bid for each business
+          for (const business of autoBidBusinesses) {
+              const autoBid = await generateAutoBidForBusiness(business.id, newRequest);
+
+              if (autoBid) {
+                  // Step 3: Save auto-generated bid in Supabase
+                  const { error: bidError } = await supabase
+                      .from("bids")
+                      .insert([
+                          {
+                              user_id: business.id,
+                              request_id: newRequest.id,
+                              bid_amount: autoBid.bidAmount,
+                              bid_description: autoBid.bidDescription,
+                          },
+                      ]);
+
+                  if (bidError) {
+                      console.error("❌ Error saving AI bid:", bidError.message);
+                  } else {
+                      console.log(`✅ AI Bid Placed: $${autoBid.bidAmount} by Business ${business.id}`);
+                  }
+              }
+          }
+      })
+      .subscribe();
+};
+// Start listening for new requests
+listenForNewRequests();
 
 // Enable CORS with the frontend's URL to allow api requests from the site
 app.use(cors({
