@@ -574,15 +574,53 @@ app.post("/send-message", async (req, res) => {
 
 // Autobidding API
 
-const completion = openai.chat.completions.create({
-  model: "gpt-4o-mini",
-  store: true,
-  messages: [
-    {"role": "user", "content": "write a haiku about ai"},
-  ],
-});
+app.post("/trigger-autobid", async (req, res) => {
+  const { request_id } = req.body;
 
-completion.then((result) => console.log(result.choices[0].message));
+  console.log("🚀 Supabase triggered Auto-Bid for Request:", request_id);
+
+  // Step 1: Fetch the new request details
+  const { data: requestDetails, error } = await supabase
+      .from("requests")
+      .select("*")
+      .eq("id", request_id)
+      .single();
+
+  if (error) {
+      console.error("❌ Error fetching request details:", error.message);
+      return res.status(500).json({ error: error.message });
+  }
+
+  // Step 2: Find businesses with Auto-Bidding enabled
+  const { data: businesses, error: bizError } = await supabase
+      .from("business_profiles")
+      .select("id")
+      .eq("autobid_enabled", true);
+
+  if (bizError) {
+      console.error("❌ Error fetching businesses:", bizError.message);
+      return res.status(500).json({ error: bizError.message });
+  }
+
+  console.log(`🔍 Found ${businesses.length} businesses with Auto-Bidding enabled.`);
+
+  // Step 3: Generate and insert AI bids for each business
+  for (const business of businesses) {
+      const autoBid = await generateAutoBidForBusiness(business.id, requestDetails);
+
+      if (autoBid) {
+          await supabase.from("bids").insert({
+              user_id: business.id,
+              request_id: request_id,
+              bid_amount: autoBid.bidAmount,
+              bid_description: autoBid.bidDescription
+          });
+          console.log(`✅ Auto-bid placed for Business ${business.id}`);
+      }
+  }
+
+  res.status(200).json({ message: "Auto-bid process completed." });
+});
 
 
 module.exports = app; // Export for Vercel

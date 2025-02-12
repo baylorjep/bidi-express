@@ -1,5 +1,5 @@
 const openai = require("openai");
-const supabase = require("./supabaseClient"); // Your existing Supabase client
+const supabase = require("./supabaseClient"); 
 
 const generateAutoBidForBusiness = async (businessId, requestDetails) => {
     try {
@@ -67,9 +67,9 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             }
         `;
 
-        // Step 5: Use OpenAI's `o1` reasoning model for structured output
+        // Step 5: Use OpenAI API to generate a structured bid
         const completion = await openai.chat.completions.create({
-            model: "o1",
+            model: "gpt-4o-mini",
             messages: [{ role: "system", content: prompt }],
             temperature: 0.3,
         });
