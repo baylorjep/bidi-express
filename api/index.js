@@ -4,7 +4,8 @@ const bodyParser = require('body-parser');
 const app = express();
 const { Resend } = require('resend');
 const supabase = require('./supabaseClient');
-
+const OpenAI = require("openai");
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // Initialize Resend with the API key
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -557,6 +558,18 @@ app.post("/send-message", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
+// Autobidding API
+
+const completion = openai.chat.completions.create({
+  model: "gpt-4o-mini",
+  store: true,
+  messages: [
+    {"role": "user", "content": "write a haiku about ai"},
+  ],
+});
+
+completion.then((result) => console.log(result.choices[0].message));
 
 
 module.exports = app; // Export for Vercel
