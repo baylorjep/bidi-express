@@ -34,54 +34,72 @@ const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY,
 const listenForNewRequests = async () => {
   console.log("📡 Listening for new job requests...");
 
-  supabase
-      .channel("new-requests")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "requests" }, async (payload) => {
-          console.log("🆕 New request detected:", payload.new);
+  // Connect to Supabase Realtime
+  const channel = supabase
+    .channel("new-requests")
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "requests" },
+      async (payload) => {
+        console.log("🆕 New request detected!", payload); // Debugging log
 
-          const newRequest = payload.new;
+        if (!payload || !payload.new) {
+          console.error("❌ Received invalid payload:", payload);
+          return;
+        }
 
-          // Step 1: Find businesses with Auto-Bidding enabled
-          const { data: autoBidBusinesses, error: businessError } = await supabase
-              .from("business_profiles")
-              .select("id, autobid_enabled")
-              .eq("autobid_enabled", true);
+        const newRequest = payload.new;
+        console.log("✅ Extracted request details:", newRequest);
 
-          if (businessError) {
-              console.error("❌ Error fetching businesses:", businessError.message);
-              return;
+        // 🔍 Check if any businesses have Auto-Bidding enabled
+        const { data: autoBidBusinesses, error: businessError } = await supabase
+          .from("business_profiles")
+          .select("id, autobid_enabled")
+          .eq("autobid_enabled", true);
+
+        if (businessError) {
+          console.error("❌ Error fetching businesses:", businessError.message);
+          return;
+        }
+
+        console.log(`🔍 Found ${autoBidBusinesses.length} businesses with Auto-Bidding enabled.`);
+
+        // Step 2: Trigger AI auto-bid for each business
+        for (const business of autoBidBusinesses) {
+          console.log(`🚀 Generating bid for Business ID: ${business.id}`);
+          const autoBid = await generateAutoBidForBusiness(business.id, newRequest);
+
+          if (autoBid) {
+            console.log(`💾 Saving AI bid: $${autoBid.bidAmount} for Business ${business.id}`);
+
+            const { error: bidError } = await supabase
+              .from("bids")
+              .insert([
+                {
+                  user_id: business.id,
+                  request_id: newRequest.id,
+                  bid_amount: autoBid.bidAmount,
+                  bid_description: autoBid.bidDescription,
+                },
+              ]);
+
+            if (bidError) {
+              console.error("❌ Error saving AI bid:", bidError.message);
+            } else {
+              console.log(`✅ AI Bid Successfully Placed for Business ${business.id}`);
+            }
+          } else {
+            console.warn(`⚠️ AI could not generate a bid for Business ${business.id}`);
           }
+        }
+      }
+    )
+    .subscribe();
 
-          console.log(`🔍 Found ${autoBidBusinesses.length} businesses with Auto-Bidding enabled.`);
-
-          // Step 2: Trigger AI auto-bid for each business
-          for (const business of autoBidBusinesses) {
-              const autoBid = await generateAutoBidForBusiness(business.id, newRequest);
-
-              if (autoBid) {
-                  // Step 3: Save auto-generated bid in Supabase
-                  const { error: bidError } = await supabase
-                      .from("bids")
-                      .insert([
-                          {
-                              user_id: business.id,
-                              request_id: newRequest.id,
-                              bid_amount: autoBid.bidAmount,
-                              bid_description: autoBid.bidDescription,
-                          },
-                      ]);
-
-                  if (bidError) {
-                      console.error("❌ Error saving AI bid:", bidError.message);
-                  } else {
-                      console.log(`✅ AI Bid Placed: $${autoBid.bidAmount} by Business ${business.id}`);
-                  }
-              }
-          }
-      })
-      .subscribe();
+  console.log("✅ Listener setup complete!");
 };
-// Start listening for new requests
+
+// Start listening
 listenForNewRequests();
 
 // Enable CORS with the frontend's URL to allow api requests from the site
