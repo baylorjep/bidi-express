@@ -58,7 +58,7 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
 
         // Step 3: Use OpenAI to Generate the Bid
         const completion = await openai.chat.completions.create({
-            model: "gpt-40-mini", // ✅ Uses stable working model
+            model: "gpt-4o-mini", // ✅ Uses stable working model
             messages: [{ role: "system", content: prompt }],
             temperature: 0.3,
         });
