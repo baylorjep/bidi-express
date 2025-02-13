@@ -616,15 +616,18 @@ app.post('/trigger-autobid', async (req, res) => {
           const autoBid = await generateAutoBidForBusiness(business.id, requestDetails);
 
           if (autoBid) {
-              // Save auto-generated bid in Supabase
+              // Save auto-generated bid in Supabase with correct column names
               const { error: bidError } = await supabase
                   .from("bids")
                   .insert([
                       {
-                          user_id: business.id,
                           request_id: request_id,
+                          user_id: business.id,
                           bid_amount: autoBid.bidAmount,
                           bid_description: autoBid.bidDescription,
+                          category: requestDetails.service_category,
+                          status: "pending", // Default status for new bids
+                          hidden: false, // Default to visible
                       },
                   ]);
 
