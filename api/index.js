@@ -16,7 +16,6 @@ const supabase = require('./supabaseClient');
 
 // OpenAI declaration for AI
 const OpenAI = require("openai");
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const { generateAutoBidForBusiness } = require('./Autobid');
 
 // Initialize Resend with the API key
@@ -575,51 +574,60 @@ app.post("/send-message", async (req, res) => {
 // Autobidding API
 
 app.post("/trigger-autobid", async (req, res) => {
-  const { request_id } = req.body;
+  try {
+      const { request_id, title, category, location, start_date, end_date, details } = req.body;
 
-  console.log("🚀 Supabase triggered Auto-Bid for Request:", request_id);
-
-  // Step 1: Fetch the new request details
-  const { data: requestDetails, error } = await supabase
-      .from("requests")
-      .select("*")
-      .eq("id", request_id)
-      .single();
-
-  if (error) {
-      console.error("❌ Error fetching request details:", error.message);
-      return res.status(500).json({ error: error.message });
-  }
-
-  // Step 2: Find businesses with Auto-Bidding enabled
-  const { data: businesses, error: bizError } = await supabase
-      .from("business_profiles")
-      .select("id")
-      .eq("autobid_enabled", true);
-
-  if (bizError) {
-      console.error("❌ Error fetching businesses:", bizError.message);
-      return res.status(500).json({ error: bizError.message });
-  }
-
-  console.log(`🔍 Found ${businesses.length} businesses with Auto-Bidding enabled.`);
-
-  // Step 3: Generate and insert AI bids for each business
-  for (const business of businesses) {
-      const autoBid = await generateAutoBidForBusiness(business.id, requestDetails);
-
-      if (autoBid) {
-          await supabase.from("bids").insert({
-              user_id: business.id,
-              request_id: request_id,
-              bid_amount: autoBid.bidAmount,
-              bid_description: autoBid.bidDescription
-          });
-          console.log(`✅ Auto-bid placed for Business ${business.id}`);
+      if (!request_id) {
+          return res.status(400).json({ error: "Missing request ID" });
       }
-  }
 
-  res.status(200).json({ message: "Auto-bid process completed." });
+      console.log(`🆕 New request detected: ${request_id}`);
+
+      // Create a dummy request object (to simulate a real one from Supabase)
+      const requestDetails = { id: request_id, title, category, location, start_date, end_date, details };
+
+      // Step 1: Find businesses with Auto-Bidding enabled
+      const { data: autoBidBusinesses, error: businessError } = await supabase
+          .from("business_profiles")
+          .select("id, autobid_enabled")
+          .eq("autobid_enabled", true);
+
+      if (businessError) {
+          console.error("❌ Error fetching businesses:", businessError.message);
+          return res.status(500).json({ error: businessError.message });
+      }
+
+      console.log(`🔍 Found ${autoBidBusinesses.length} businesses with Auto-Bidding enabled.`);
+
+      // Step 2: Generate and Save Auto-Bids
+      for (const business of autoBidBusinesses) {
+          const autoBid = await generateAutoBidForBusiness(business.id, requestDetails);
+
+          if (autoBid) {
+              const { error: bidError } = await supabase
+                  .from("bids")
+                  .insert([
+                      {
+                          user_id: business.id,
+                          request_id,
+                          bid_amount: autoBid.bidAmount,
+                          bid_description: autoBid.bidDescription,
+                      },
+                  ]);
+
+              if (bidError) {
+                  console.error("❌ Error saving AI bid:", bidError.message);
+              } else {
+                  console.log(`✅ AI Bid Placed: $${autoBid.bidAmount} by Business ${business.id}`);
+              }
+          }
+      }
+
+      res.json({ message: "Auto-bid processing complete!" });
+  } catch (error) {
+      console.error("❌ Error in auto-bid processing:", error);
+      res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 

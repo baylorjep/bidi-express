@@ -1,4 +1,5 @@
 const openai = require("openai");
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const supabase = require("./supabaseClient"); 
 
 const generateAutoBidForBusiness = async (businessId, requestDetails) => {
