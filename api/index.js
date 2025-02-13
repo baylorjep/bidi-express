@@ -15,7 +15,6 @@ const { Resend } = require('resend');
 const supabase = require('./supabaseClient');
 
 // OpenAI declaration for AI
-const OpenAI = require("openai");
 const { generateAutoBidForBusiness } = require('./Autobid');
 
 // Initialize Resend with the API key
