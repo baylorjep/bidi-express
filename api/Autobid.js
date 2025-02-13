@@ -7,10 +7,10 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
     try {
         console.log(`🔍 Fetching past bids & request details for Business ID: ${businessId}`);
 
-        // Retrieve past bids for this business
+        // Retrieve past bids for this business (using correct `bids` table columns)
         const { data: pastBids, error: bidError } = await supabase
             .from("bids")
-            .select("bid_amount, bid_description, request_id, won_bid")
+            .select("bid_amount, bid_description, request_id, category")
             .eq("user_id", businessId)
             .order("created_at", { ascending: false })
             .limit(10);
@@ -20,7 +20,7 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             return null;
         }
 
-        // Fetch request details for past bids
+        // Fetch request details for past bids (using correct `requests` table columns)
         let pastRequestDetails = [];
         if (pastBids.length > 0) {
             const requestIds = pastBids.map(bid => bid.request_id);
@@ -38,7 +38,7 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
         const bidHistoryText = pastBids.length > 0
             ? pastBids.map((bid, index) => {
                 const request = pastRequestDetails.find(r => r.id === bid.request_id);
-                return `Bid ${index + 1}: $${bid.bid_amount} - "${bid.bid_description}" on "${request?.service_title}" (Category: ${request?.service_category}, Location: ${request?.location}) - Won: ${bid.won_bid ? "Yes" : "No"}`;
+                return `Bid ${index + 1}: $${bid.bid_amount} - "${bid.bid_description}" on "${request?.service_title}" (Category: ${request?.service_category}, Location: ${request?.location})`;
               }).join("\n")
             : "No bid history available yet.";
 

@@ -582,7 +582,7 @@ app.post('/trigger-autobid', async (req, res) => {
   try {
       console.log(`🆕 Auto-bid triggered for Request ID: ${request_id}`);
 
-      // Fetch request details from Supabase using the correct column names
+      // Fetch request details using correct column names
       const { data: requestDetails, error: requestError } = await supabase
           .from("requests")
           .select("id, service_category, service_title, location, service_date, end_date, service_description")
@@ -609,44 +609,25 @@ app.post('/trigger-autobid', async (req, res) => {
 
       console.log(`🔍 Found ${autoBidBusinesses.length} businesses with Auto-Bidding enabled.`);
 
-      let bidsPlaced = [];
+      let bidsGenerated = [];
 
-      // Trigger AI auto-bid for each business
+      // Generate auto-bids for each business (NO INSERTION)
       for (const business of autoBidBusinesses) {
           const autoBid = await generateAutoBidForBusiness(business.id, requestDetails);
 
           if (autoBid) {
-              // Save auto-generated bid in Supabase with correct column names
-              const { error: bidError } = await supabase
-                  .from("bids")
-                  .insert([
-                      {
-                          request_id: request_id,
-                          user_id: business.id,
-                          bid_amount: autoBid.bidAmount,
-                          bid_description: autoBid.bidDescription,
-                          category: requestDetails.service_category,
-                          status: "pending", // Default status for new bids
-                          hidden: false, // Default to visible
-                      },
-                  ]);
-
-              if (bidError) {
-                  console.error("❌ Error saving AI bid:", bidError.message);
-              } else {
-                  console.log(`✅ AI Bid Placed: $${autoBid.bidAmount} by Business ${business.id}`);
-                  bidsPlaced.push({
-                      business_id: business.id,
-                      bid_amount: autoBid.bidAmount,
-                      bid_description: autoBid.bidDescription,
-                  });
-              }
+              console.log(`🚀 Auto-bid generated for Business ${business.id}:`, autoBid);
+              bidsGenerated.push({
+                  business_id: business.id,
+                  bid_amount: autoBid.bidAmount,
+                  bid_description: autoBid.bidDescription,
+              });
           }
       }
 
       res.status(200).json({
-          message: "Auto-bids placed successfully",
-          bids: bidsPlaced,
+          message: "Auto-bids generated successfully (LOG ONLY, NO INSERTION)",
+          bids: bidsGenerated,
       });
 
   } catch (error) {
