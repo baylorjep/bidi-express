@@ -1,14 +1,8 @@
 const OpenAI = require("openai");
 const supabase = require("./supabaseClient");
 
+// Initialize OpenAI with API Key
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-// ✅ Extract JSON from OpenAI response safely
-const extractJson = (llmResponse) => {
-    const match = llmResponse.match(/```json\n([\s\S]*?)\n```/); // Match ```json ... ``` blocks
-    if (match) return match[1].trim(); // Extract JSON and trim whitespace
-    return llmResponse.trim(); // Return as-is if it's already raw JSON
-};
 
 const generateAutoBidForBusiness = async (businessId, requestDetails) => {
     try {
@@ -34,56 +28,53 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
               ).join("\n")
             : "No bid history available yet.";
 
-            const prompt = `
+        const prompt = `
             You are an AI-powered bidding strategist generating competitive bids for a business.
-            
-            **Business ID:** ${businessId}
+
+            **Business ID:** ${businessId}  
             **Past Bids & Performance:**  
             ${bidHistoryText}
-            
+
             **New Service Request:**  
-            - **Service:** ${requestDetails.service_title}
-            - **Category:** ${requestDetails.service_category}
-            - **Location:** ${requestDetails.location}
-            - **Date Range:** ${requestDetails.service_date} - ${requestDetails.end_date}
-            - **Details:** ${requestDetails.service_description}
-            
-            **Instructions:**  
-            - Generate a **realistic** bid based on past successful bids if available.  
-            - If no past bids exist, estimate a fair market bid.  
-            - The bid should be **competitive but reasonable**.  
+            - **Service:** ${requestDetails.service_title}  
+            - **Category:** ${requestDetails.service_category}  
+            - **Location:** ${requestDetails.location}  
+            - **Date Range:** ${requestDetails.service_date} - ${requestDetails.end_date}  
+            - **Details:** ${requestDetails.service_description}  
 
             **Bid Strategy:**  
             - Generate a bid based on past successful bids if available.  
             - If no past bids exist, estimate a fair market bid.  
             - Make the bid **competitive but reasonable**.  
-            
-            **IMPORTANT:**  
-            - Return ONLY valid JSON.  
-            - Do NOT include markdown, code blocks, or explanations. 
 
-            **Expected Output Format:**
+            **Return JSON format ONLY:**  
+            \`\`\`json
             {
                 "bidAmount": <calculated bid price>,
                 "bidDescription": "<concise bid message>"
-            } 
-            
+            }
+            \`\`\`
         `;
 
         // Step 3: Use OpenAI to Generate the Bid
         const completion = await openai.chat.completions.create({
-            model: "o1-mini",
-            messages: [{ role: "user", content: prompt }],
+            model: "gpt-40-mini", // ✅ Uses stable working model
+            messages: [{ role: "system", content: prompt }],
+            temperature: 0.3,
         });
 
-        // Extract JSON response safely
-        const aiBidRaw = completion.choices[0].message.content.trim(); // Just trim whitespace
+        const aiBidRaw = completion.choices[0].message.content;
 
+        // **Step 3.5: Clean JSON response before parsing**
+        const match = aiBidRaw.match(/```json\n([\s\S]*?)\n```/);
+        let aiBidClean = match ? match[1].trim() : aiBidRaw.trim();
+
+        let aiBid;
         try {
-            const aiBid = JSON.parse(aiBidRaw); // Expecting clean JSON from the model
+            aiBid = JSON.parse(aiBidClean);
             console.log(`✅ AI-Generated Bid for Business ${businessId}:`, aiBid);
         } catch (error) {
-            console.error("❌ AI response is not valid JSON:", aiBidRaw, error);
+            console.error("❌ Error parsing AI bid response:", aiBidClean, error);
             return null;
         }
 
@@ -92,7 +83,7 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             ? "Photography" 
             : "General";
 
-        // Step 5: Insert AI-generated bid into Supabase
+        // **Step 5: Insert AI-generated bid into Supabase**
         const { error: insertError } = await supabase
             .from("bids")
             .insert([
@@ -102,6 +93,8 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
                     bid_amount: aiBid.bidAmount,
                     bid_description: aiBid.bidDescription,
                     category: bidCategory, // Auto-set category based on request
+                    status: "pending", // ✅ Ensures default "pending" status
+                    hidden: null // ✅ Matches your DB defaults
                 },
             ]);
 
