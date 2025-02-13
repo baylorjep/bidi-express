@@ -34,32 +34,40 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
               ).join("\n")
             : "No bid history available yet.";
 
-        const prompt = `
+            const prompt = `
             You are an AI-powered bidding strategist generating competitive bids for a business.
-
-            **Business ID:** ${businessId}  
+            
+            **Business ID:** ${businessId}
             **Past Bids & Performance:**  
             ${bidHistoryText}
-
+            
             **New Service Request:**  
-            - **Service:** ${requestDetails.service_title}  
-            - **Category:** ${requestDetails.service_category}  
-            - **Location:** ${requestDetails.location}  
-            - **Date Range:** ${requestDetails.service_date} - ${requestDetails.end_date}  
-            - **Details:** ${requestDetails.service_description}  
+            - **Service:** ${requestDetails.service_title}
+            - **Category:** ${requestDetails.service_category}
+            - **Location:** ${requestDetails.location}
+            - **Date Range:** ${requestDetails.service_date} - ${requestDetails.end_date}
+            - **Details:** ${requestDetails.service_description}
+            
+            **Instructions:**  
+            - Generate a **realistic** bid based on past successful bids if available.  
+            - If no past bids exist, estimate a fair market bid.  
+            - The bid should be **competitive but reasonable**.  
 
             **Bid Strategy:**  
             - Generate a bid based on past successful bids if available.  
             - If no past bids exist, estimate a fair market bid.  
             - Make the bid **competitive but reasonable**.  
+            
+            **IMPORTANT:**  
+            - Return ONLY valid JSON.  
+            - Do NOT include markdown, code blocks, or explanations. 
 
-            **Return JSON format ONLY:**  
-            \`\`\`json
+            **Expected Output Format:**
             {
                 "bidAmount": <calculated bid price>,
                 "bidDescription": "<concise bid message>"
-            }
-            \`\`\`
+            } 
+            
         `;
 
         // Step 3: Use OpenAI to Generate the Bid
@@ -69,15 +77,13 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
         });
 
         // Extract JSON response safely
-        const aiBidRaw = completion.choices[0].message.content;
-        const aiBidClean = extractJson(aiBidRaw);
+        const aiBidRaw = completion.choices[0].message.content.trim(); // Just trim whitespace
 
-        let aiBid;
         try {
-            aiBid = JSON.parse(aiBidClean);
+            const aiBid = JSON.parse(aiBidRaw); // Expecting clean JSON from the model
             console.log(`✅ AI-Generated Bid for Business ${businessId}:`, aiBid);
         } catch (error) {
-            console.error("❌ Error parsing AI bid response:", aiBidClean, error);
+            console.error("❌ AI response is not valid JSON:", aiBidRaw, error);
             return null;
         }
 
