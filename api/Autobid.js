@@ -8,7 +8,7 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
     try {
         console.log(`🔍 Fetching past bids & request details for Business ID: ${businessId}`);
 
-        // Step 1: Retrieve past bids/requests for this business
+        // Step 1: Retrieve past bids for this business
         const { data: pastBids, error: bidError } = await supabase
             .from("bids")
             .select("bid_amount, bid_description, request_id")
@@ -23,21 +23,28 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
 
         // Step 2: Fetch request details manually for each bid
         let pastBidsWithRequests = [];
+
         for (const bid of pastBids) {
             const { data: requestDetails, error: requestError } = await supabase
-                .from("requests") // This assumes a single "requests" table for now
+                .from("requests") // Querying the "requests" table
                 .select("service_category, service_title, location, service_date, end_date, service_description")
                 .eq("id", bid.request_id)
-                .single(); // Fetch only one record
+                .maybeSingle(); // ✅ Prevents errors if no record is found
 
             if (requestError) {
-                console.warn(`⚠️ No request found for request_id ${bid.request_id}`);
-                continue; // Skip this bid if no request is found
+                console.warn(`⚠️ Error fetching request for request_id ${bid.request_id}:`, requestError.message);
             }
 
             pastBidsWithRequests.push({
                 ...bid,
-                requestDetails,
+                requestDetails: requestDetails || { // ✅ Provide default values if request is missing
+                    service_category: "Unknown",
+                    service_title: "Unknown Service",
+                    location: "Unknown",
+                    service_date: "Unknown",
+                    end_date: "Unknown",
+                    service_description: "No details provided"
+                },
             });
         }
 
@@ -49,50 +56,47 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             .single();
 
         if (pricingError) {
-            console.error("⚠️ No explicit pricing rules found for Business ID:", businessId);
+            console.warn("⚠️ No explicit pricing rules found for Business ID:", businessId);
         }
 
-        // Extract pricing details
+        // Extract pricing details safely
         const pricingDetails = pricingRules
             ? `
             **Pricing Strategy:**  
-            - **Min Price:** $${pricingRules.min_price}  
-            - **Max Price:** $${pricingRules.max_price}  
-            - **Pricing Model:** ${pricingRules.pricing_model}  
-            - **Hourly Rate (if applicable):** $${pricingRules.hourly_rate || "N/A"}  
-            - **Additional Comments:** ${pricingRules.additional_comments || "None"}  
+            - **Min Price:** $${pricingRules?.min_price ?? "N/A"}  
+            - **Max Price:** $${pricingRules?.max_price ?? "N/A"}  
+            - **Pricing Model:** ${pricingRules?.pricing_model ?? "Not specified"}  
+            - **Hourly Rate (if applicable):** $${pricingRules?.hourly_rate ?? "N/A"}  
+            - **Additional Comments:** ${pricingRules?.additional_comments ?? "None"}  
             `
             : "This business has not set explicit pricing rules. Use past bids and industry norms to guide the bid.";
 
-      
+        // Step 4: Construct AI Prompt (✅ Fixed `bid.requestDetails`)
+        const bidHistoryText = pastBidsWithRequests.length > 0
+            ? pastBidsWithRequests.map((bid, index) => {
+                const request = bid.requestDetails; // ✅ Fetch associated request details
 
-        // Step 4: Construct AI Prompt
-
-        // grab data from past bids and requests
-        const bidHistoryText = pastBids.length > 0
-            ? pastBids.map((bid, index) => {
-                const request = bid.requests; // Fetch associated request details
                 return `Bid ${index + 1}: $${bid.bid_amount} - "${bid.bid_description}" 
                 for request:
-                - **Service:** ${request.service_title}
-                - **Category:** ${request.service_category}
-                - **Location:** ${request.location}
-                - **Date Range:** ${request.service_date} - ${request.end_date}
-                - **Details:** ${request.service_description}`;
+                - **Service:** ${request.service_title || "Unknown"}
+                - **Category:** ${request.service_category || "Unknown"}
+                - **Location:** ${request.location || "Unknown"}
+                - **Date Range:** ${request.service_date || "Unknown"} - ${request.end_date || "Unknown"}
+                - **Details:** ${request.service_description || "No details provided"}`;
             }).join("\n\n")
             : "No bid history available yet.";
-
 
         const prompt = `
             You are an AI-powered business assistant and bidding strategist generating competitive bids for a business.
 
-            ### **Business Profile:
-            ID:** ${businessId}  
-            ** Your past successful bids and their job details: 
-            ${bidHistoryText} **
-            ** Pricing Strategy and preferences: ${pricingDetails} **
+            ### **Business Profile**
+            - **ID:** ${businessId}  
+            - **Past Successful Bids and Job Details:**  
+            ${bidHistoryText}  
+            - **Pricing Strategy & Preferences:**  
+            ${pricingDetails}  
 
-            **New Service Request:**  
+            ### **New Service Request**  
             - **Service:** ${requestDetails.service_title}  
             - **Category:** ${requestDetails.service_category}  
             - **Location:** ${requestDetails.location}  
