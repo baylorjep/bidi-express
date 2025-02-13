@@ -57,7 +57,7 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
         const completion = await openai.chat.completions.create({
             model: "o1-mini",
             messages: [{ role: "user", content: prompt }],
-            temperature: 0.3,
+            
         });
 
         const aiBid = JSON.parse(completion.choices[0].message.content);
