@@ -3,35 +3,26 @@ const supabase = require("./supabaseClient");
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// ✅ Extract JSON from OpenAI response safely
-const extractJson = (llmResponse) => {
-    const match = llmResponse.match(/```json\n([\s\S]*?)\n```/); // Match ```json ... ``` blocks
-    if (match) return match[1].trim(); // Extract JSON and trim whitespace
-    return llmResponse.trim(); // Return as-is if it's already raw JSON
-};
-
 const generateAutoBidForBusiness = async (businessId, requestDetails) => {
     try {
         console.log(`🔍 Fetching past bids & request details for Business ID: ${businessId}`);
 
-        // Step 1: Retrieve past bids for this business
         const { data: pastBids, error: bidError } = await supabase
             .from("bids")
             .select("bid_amount, bid_description, request_id")
-            .eq("user_id", businessId)
+            .eq("user_id", businessId) // Assuming user_id is the business ID
             .order("created_at", { ascending: false })
             .limit(10);
 
         if (bidError) {
-            console.error("❌ Error fetching past bids:", bidError.message);
+            console.error("❌ Error fetching past bids:", bidError); // Log the error object
             return null;
         }
 
-        // Step 2: Construct AI Prompt
-        const bidHistoryText = pastBids.length > 0
-            ? pastBids.map((bid, index) => 
+        const bidHistoryText = pastBids && pastBids.length > 0  // Check if pastBids exists
+            ? pastBids.map((bid, index) =>
                 `Bid ${index + 1}: $${bid.bid_amount} - "${bid.bid_description}" on Request ${bid.request_id}`
-              ).join("\n")
+            ).join("\n")
             : "No bid history available yet.";
 
         const prompt = `
@@ -62,15 +53,22 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             \`\`\`
         `;
 
-        // Step 3: Use OpenAI to Generate the Bid
         const completion = await openai.chat.completions.create({
-            model: "o1-mini",
+            model: "o1-mini", // Or another suitable model
             messages: [{ role: "user", content: prompt }],
         });
 
-        // Extract JSON response safely
         const aiBidRaw = completion.choices[0].message.content;
-        const aiBidClean = extractJson(aiBidRaw);
+
+        // Extract JSON using a more robust approach
+        const match = aiBidRaw.match(/```json\n([\s\S]*?)\n```/);
+        let aiBidClean;
+        if (match) {
+            aiBidClean = match[1].trim();
+        } else {
+            console.error("❌ No JSON block found in AI response:", aiBidRaw);
+            return null;
+        }
 
         let aiBid;
         try {
@@ -81,12 +79,10 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             return null;
         }
 
-        // Step 4: Determine Bid Category
-        const bidCategory = ["photography", "videography"].includes(requestDetails.service_category.toLowerCase()) 
-            ? "Photography" 
+        const bidCategory = ["photography", "videography"].includes(requestDetails.service_category?.toLowerCase()) // Optional chaining
+            ? "Photography"
             : "General";
 
-        // Step 5: Insert AI-generated bid into Supabase
         const { error: insertError } = await supabase
             .from("bids")
             .insert([
@@ -95,12 +91,12 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
                     user_id: businessId,
                     bid_amount: aiBid.bidAmount,
                     bid_description: aiBid.bidDescription,
-                    category: bidCategory, // Auto-set category based on request
+                    category: bidCategory,
                 },
             ]);
 
         if (insertError) {
-            console.error("❌ Error inserting AI bid into database:", insertError.message);
+            console.error("❌ Error inserting AI bid into database:", insertError); // Log the error object
             return null;
         }
 
@@ -108,10 +104,34 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
         return aiBid;
 
     } catch (error) {
-        console.error("❌ Error generating AI bid:", error);
+        console.error("❌ Error generating AI bid:", error); // Log the error object
         return null;
     }
 };
 
-// Export function
+
+app.post('/trigger-autobid', async (req, res) => {
+    // ... (rest of your route code)
+
+    try {
+        // ... (fetch request details and businesses)
+
+        const autoBidPromises = autoBidBusinesses.map(async (business) => { // Use map for parallel execution
+            return generateAutoBidForBusiness(business.id, requestDetails);
+        });
+
+        const bids = await Promise.all(autoBidPromises); // Wait for all bids to be generated
+
+        const successfulBids = bids.filter(bid => bid !== null); // Filter out failed bid generations
+
+        res.status(200).json({
+            message: "Auto-bids generated successfully (LOG ONLY, NO INSERTION)",
+            bids: successfulBids, // Return only successful bids
+        });
+
+    } catch (error) {
+       // ... (error handling)
+    }
+});
+
 module.exports = { generateAutoBidForBusiness };
