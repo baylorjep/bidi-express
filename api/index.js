@@ -582,10 +582,10 @@ app.post('/trigger-autobid', async (req, res) => {
   try {
       console.log(`🆕 Auto-bid triggered for Request ID: ${request_id}`);
 
-      // Fetch request details from Supabase
+      // Fetch request details from Supabase using the correct column names
       const { data: requestDetails, error: requestError } = await supabase
           .from("requests")
-          .select("id, category, title, location, start_date, end_date, details")
+          .select("id, service_category, service_title, location, service_date, end_date, service_description")
           .eq("id", request_id)
           .single();
 
