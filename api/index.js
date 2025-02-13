@@ -572,18 +572,31 @@ app.post("/send-message", async (req, res) => {
 
 // Autobidding API
 
-// ✅ API to Handle Auto-Bidding Requests
-app.post("/trigger-autobid", async (req, res) => {
-  try {
-      const requestDetails = req.body;
+app.post('/trigger-autobid', async (req, res) => {
+  const { request_id } = req.body;
 
-      if (!requestDetails.title || !requestDetails.category || !requestDetails.location) {
-          return res.status(400).json({ error: "Missing required fields" });
+  if (!request_id) {
+      return res.status(400).json({ error: "Missing required field: request_id." });
+  }
+
+  try {
+      console.log(`🆕 Auto-bid triggered for Request ID: ${request_id}`);
+
+      // Fetch request details from Supabase
+      const { data: requestDetails, error: requestError } = await supabase
+          .from("requests")
+          .select("id, category, title, location, start_date, end_date, details")
+          .eq("id", request_id)
+          .single();
+
+      if (requestError || !requestDetails) {
+          console.error(`❌ Error fetching request details:`, requestError);
+          return res.status(404).json({ error: "Request not found." });
       }
 
-      console.log(`🆕 New request received for auto-bidding:`, requestDetails);
+      console.log(`🔍 Retrieved request details:`, requestDetails);
 
-      // Step 1: Find businesses with Auto-Bidding enabled
+      // Find businesses with Auto-Bidding enabled
       const { data: autoBidBusinesses, error: businessError } = await supabase
           .from("business_profiles")
           .select("id, autobid_enabled")
@@ -591,21 +604,51 @@ app.post("/trigger-autobid", async (req, res) => {
 
       if (businessError) {
           console.error("❌ Error fetching businesses:", businessError.message);
-          return res.status(500).json({ error: businessError.message });
+          return res.status(500).json({ error: "Failed to fetch businesses." });
       }
 
       console.log(`🔍 Found ${autoBidBusinesses.length} businesses with Auto-Bidding enabled.`);
 
-      // Step 2: Generate and Log Auto-Bids
+      let bidsPlaced = [];
+
+      // Trigger AI auto-bid for each business
       for (const business of autoBidBusinesses) {
           const autoBid = await generateAutoBidForBusiness(business.id, requestDetails);
-          console.log(`🚀 Auto-bid generated for business ${business.id}:`, autoBid);
+
+          if (autoBid) {
+              // Save auto-generated bid in Supabase
+              const { error: bidError } = await supabase
+                  .from("bids")
+                  .insert([
+                      {
+                          user_id: business.id,
+                          request_id: request_id,
+                          bid_amount: autoBid.bidAmount,
+                          bid_description: autoBid.bidDescription,
+                      },
+                  ]);
+
+              if (bidError) {
+                  console.error("❌ Error saving AI bid:", bidError.message);
+              } else {
+                  console.log(`✅ AI Bid Placed: $${autoBid.bidAmount} by Business ${business.id}`);
+                  bidsPlaced.push({
+                      business_id: business.id,
+                      bid_amount: autoBid.bidAmount,
+                      bid_description: autoBid.bidDescription,
+                  });
+              }
+          }
       }
 
-      res.json({ message: "Auto-bid processing complete! Check logs." });
+      res.status(200).json({
+          message: "Auto-bids placed successfully",
+          bids: bidsPlaced,
+      });
+
   } catch (error) {
-      console.error("❌ Error in auto-bid processing:", error);
-      res.status(500).json({ error: "Internal server error" });
+      console.error("❌ Error triggering auto-bid:", error.message);
+      res.status(500).json({ error: "Failed to trigger auto-bid.", details: error.message });
   }
 });
 
