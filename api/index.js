@@ -599,7 +599,7 @@ app.post('/trigger-autobid', async (req, res) => {
       // Find businesses with Auto-Bidding enabled
       const { data: autoBidBusinesses, error: businessError } = await supabase
           .from("business_profiles")
-          .select("id, autobid_enabled")
+          .select("id, autobid_enabled, business_category")
           .eq("autobid_enabled", true);
 
       if (businessError) {
@@ -607,22 +607,25 @@ app.post('/trigger-autobid', async (req, res) => {
           return res.status(500).json({ error: "Failed to fetch businesses." });
       }
 
-      console.log(`🔍 Found ${autoBidBusinesses.length} businesses with Auto-Bidding enabled.`);
+      // Filter businesses to only include those whose category matches the request's category
+      const eligibleBusinesses = autoBidBusinesses.filter(business =>
+        business.business_category.toLowerCase() === requestDetails.service_category.toLowerCase()
+      );
+
+      console.log(`🔍 Found ${eligibleBusinesses.length} eligible businesses for category: ${requestDetails.service_category}`);
 
       let bidsGenerated = [];
 
-      // Generate auto-bids for each business (NO INSERTION)
-      for (const business of autoBidBusinesses) {
-          const autoBid = await generateAutoBidForBusiness(business.id, requestDetails);
-
-          if (autoBid) {
-              console.log(`🚀 Auto-bid generated for Business ${business.id}:`, autoBid);
-              bidsGenerated.push({
-                  business_id: business.id,
-                  bid_amount: autoBid.bidAmount,
-                  bid_description: autoBid.bidDescription,
-              });
-          }
+      for (const business of eligibleBusinesses) {
+        const autoBid = await generateAutoBidForBusiness(business.id, requestDetails);
+        if (autoBid) {
+            console.log(`🚀 Auto-bid generated for Business ${business.id}:`, autoBid);
+            bidsGenerated.push({
+                business_id: business.id,
+                bid_amount: autoBid.bidAmount,
+                bid_description: autoBid.bidDescription,
+            });
+        }
       }
 
       res.status(200).json({
