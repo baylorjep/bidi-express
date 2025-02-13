@@ -120,6 +120,8 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
         `;
 
         // Step 5: Use OpenAI to Generate the Bid
+        console.log("📜 **AI Prompt Sent to OpenAI:**");
+        console.log(prompt); // ✅ This prints the full prompt for debugging
         const completion = await openai.chat.completions.create({
             model: "gpt-4o-mini", // ✅ Uses stable working model
             messages: [{ role: "system", content: prompt }],
