@@ -27,7 +27,7 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
         for (const bid of pastBids) {
             const { data: requestDetails, error: requestError } = await supabase
                 .from("requests") // Querying the "requests" table
-                .select("service_category, service_title, location, service_date, end_date, service_description")
+                .select("service_category, service_title, location, service_date, end_date, service_description, additional_comments")
                 .eq("id", bid.request_id)
                 .maybeSingle(); // ✅ Prevents errors if no record is found
 
@@ -43,7 +43,8 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
                     location: "Unknown",
                     service_date: "Unknown",
                     end_date: "Unknown",
-                    service_description: "No details provided"
+                    service_description: "No details provided",
+                    additional_comments: "No details provided"
                 },
             });
         }
@@ -83,7 +84,8 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
                 - **Category:** ${request.service_category || "Unknown"}
                 - **Location:** ${request.location || "Unknown"}
                 - **Date Range:** ${request.service_date || "Unknown"} - ${request.end_date || "Unknown"}
-                - **Details:** ${request.service_description || "No details provided"}`;
+                - **Details:** ${request.service_description || "No details provided"}
+                - **Additional Comments:** ${request.additional_comments || "No details provided"}`;
             }).join("\n\n")
             : "No bid history available yet.";
 
@@ -103,6 +105,7 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             - **Location:** ${requestDetails.location}  
             - **Date Range:** ${requestDetails.service_date} - ${requestDetails.end_date}  
             - **Details:** ${requestDetails.service_description}  
+            - **Additional Comments:** ${requestDetails.additional_comments}
 
             ### **⚡ Weighted Bidding Strategy**
             1. **Start with the pricing rules first**:
