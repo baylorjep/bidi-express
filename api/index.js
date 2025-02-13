@@ -572,18 +572,16 @@ app.post("/send-message", async (req, res) => {
 
 // Autobidding API
 
+// ✅ API to Handle Auto-Bidding Requests
 app.post("/trigger-autobid", async (req, res) => {
   try {
-      const { request_id, title, category, location, start_date, end_date, details } = req.body;
+      const requestDetails = req.body;
 
-      if (!request_id) {
-          return res.status(400).json({ error: "Missing request ID" });
+      if (!requestDetails.title || !requestDetails.category || !requestDetails.location) {
+          return res.status(400).json({ error: "Missing required fields" });
       }
 
-      console.log(`🆕 New request detected: ${request_id}`);
-
-      // Create a dummy request object (to simulate a real one from Supabase)
-      const requestDetails = { id: request_id, title, category, location, start_date, end_date, details };
+      console.log(`🆕 New request received for auto-bidding:`, requestDetails);
 
       // Step 1: Find businesses with Auto-Bidding enabled
       const { data: autoBidBusinesses, error: businessError } = await supabase
@@ -598,31 +596,13 @@ app.post("/trigger-autobid", async (req, res) => {
 
       console.log(`🔍 Found ${autoBidBusinesses.length} businesses with Auto-Bidding enabled.`);
 
-      // Step 2: Generate and Save Auto-Bids
+      // Step 2: Generate and Log Auto-Bids
       for (const business of autoBidBusinesses) {
           const autoBid = await generateAutoBidForBusiness(business.id, requestDetails);
-
-          if (autoBid) {
-              const { error: bidError } = await supabase
-                  .from("bids")
-                  .insert([
-                      {
-                          user_id: business.id,
-                          request_id,
-                          bid_amount: autoBid.bidAmount,
-                          bid_description: autoBid.bidDescription,
-                      },
-                  ]);
-
-              if (bidError) {
-                  console.error("❌ Error saving AI bid:", bidError.message);
-              } else {
-                  console.log(`✅ AI Bid Placed: $${autoBid.bidAmount} by Business ${business.id}`);
-              }
-          }
+          console.log(`🚀 Auto-bid generated for business ${business.id}:`, autoBid);
       }
 
-      res.json({ message: "Auto-bid processing complete!" });
+      res.json({ message: "Auto-bid processing complete! Check logs." });
   } catch (error) {
       console.error("❌ Error in auto-bid processing:", error);
       res.status(500).json({ error: "Internal server error" });
