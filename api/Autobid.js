@@ -46,7 +46,7 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             - If no past bids exist, estimate a fair market bid.  
             - Make the bid **competitive but reasonable**.  
 
-            **Return JSON format:**  
+            **Return JSON format ONLY:**  
             {
                 "bidAmount": <calculated bid price>,
                 "bidDescription": "<concise bid message>"
@@ -57,11 +57,22 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
         const completion = await openai.chat.completions.create({
             model: "o1-mini",
             messages: [{ role: "user", content: prompt }],
-            
         });
 
-        const aiBid = JSON.parse(completion.choices[0].message.content);
-        console.log(`✅ AI-Generated Bid for Business ${businessId}:`, aiBid);
+        // Extract JSON response safely
+        const aiBidRaw = completion.choices[0].message.content;
+
+        // Remove potential Markdown formatting like ```json ... ```
+        const aiBidClean = aiBidRaw.replace(/```json|```/g, "").trim();
+
+        let aiBid;
+        try {
+            aiBid = JSON.parse(aiBidClean);
+            console.log(`✅ AI-Generated Bid for Business ${businessId}:`, aiBid);
+        } catch (error) {
+            console.error("❌ Error parsing AI bid response:", aiBidClean, error);
+            return null;
+        }
 
         // Step 4: Determine Bid Category
         const bidCategory = ["photography", "videography"].includes(requestDetails.service_category.toLowerCase()) 
@@ -87,7 +98,8 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
         }
 
         console.log(`🚀 AI bid successfully inserted into database for Business ${businessId}`);
-        return aiBid;
+
+        return aiBid; // ✅ Now we return at the **end** of the function
 
     } catch (error) {
         console.error("❌ Error generating AI bid:", error);
