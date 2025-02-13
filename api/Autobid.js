@@ -3,6 +3,13 @@ const supabase = require("./supabaseClient");
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// ✅ Extract JSON from OpenAI response safely
+const extractJson = (llmResponse) => {
+    const match = llmResponse.match(/```json\n([\s\S]*?)\n```/); // Match ```json ... ``` blocks
+    if (match) return match[1].trim(); // Extract JSON and trim whitespace
+    return llmResponse.trim(); // Return as-is if it's already raw JSON
+};
+
 const generateAutoBidForBusiness = async (businessId, requestDetails) => {
     try {
         console.log(`🔍 Fetching past bids & request details for Business ID: ${businessId}`);
@@ -47,10 +54,12 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             - Make the bid **competitive but reasonable**.  
 
             **Return JSON format ONLY:**  
+            \`\`\`json
             {
                 "bidAmount": <calculated bid price>,
                 "bidDescription": "<concise bid message>"
             }
+            \`\`\`
         `;
 
         // Step 3: Use OpenAI to Generate the Bid
@@ -61,9 +70,7 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
 
         // Extract JSON response safely
         const aiBidRaw = completion.choices[0].message.content;
-
-        // Remove potential Markdown formatting like ```json ... ```
-        const aiBidClean = aiBidRaw.replace(/```json|```/g, "").trim();
+        const aiBidClean = extractJson(aiBidRaw);
 
         let aiBid;
         try {
@@ -98,8 +105,7 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
         }
 
         console.log(`🚀 AI bid successfully inserted into database for Business ${businessId}`);
-
-        return aiBid; // ✅ Now we return at the **end** of the function
+        return aiBid;
 
     } catch (error) {
         console.error("❌ Error generating AI bid:", error);
