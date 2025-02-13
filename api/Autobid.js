@@ -11,12 +11,7 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
         // Step 1: Retrieve past bids/requests for this business
         const { data: pastBids, error: bidError } = await supabase
             .from("bids")
-            .select(`
-                bid_amount,
-                bid_description,
-                request_id,
-                requests(service_category, service_title, location, service_date, end_date, service_description)
-            `)
+            .select("bid_amount, bid_description, request_id")
             .eq("user_id", businessId)
             .order("created_at", { ascending: false })
             .limit(10);
@@ -26,7 +21,27 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             return null;
         }
 
-        // Step 2: Retrieve the business's pricing rules
+        // Step 2: Fetch request details manually for each bid
+        let pastBidsWithRequests = [];
+        for (const bid of pastBids) {
+            const { data: requestDetails, error: requestError } = await supabase
+                .from("requests") // This assumes a single "requests" table for now
+                .select("service_category, service_title, location, service_date, end_date, service_description")
+                .eq("id", bid.request_id)
+                .single(); // Fetch only one record
+
+            if (requestError) {
+                console.warn(`⚠️ No request found for request_id ${bid.request_id}`);
+                continue; // Skip this bid if no request is found
+            }
+
+            pastBidsWithRequests.push({
+                ...bid,
+                requestDetails,
+            });
+        }
+
+        // Step 3: Retrieve the business's pricing rules
         const { data: pricingRules, error: pricingError } = await supabase
             .from("business_pricing_rules")
             .select("*")
@@ -51,7 +66,7 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
 
       
 
-        // Step 3: Construct AI Prompt
+        // Step 4: Construct AI Prompt
 
         // grab data from past bids and requests
         const bidHistoryText = pastBids.length > 0
@@ -100,7 +115,7 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             \`\`\`
         `;
 
-        // Step 4: Use OpenAI to Generate the Bid
+        // Step 5: Use OpenAI to Generate the Bid
         const completion = await openai.chat.completions.create({
             model: "gpt-4o-mini", // ✅ Uses stable working model
             messages: [{ role: "system", content: prompt }],
@@ -109,7 +124,7 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
 
         const aiBidRaw = completion.choices[0].message.content;
 
-        // **Step 4.5: Clean JSON response before parsing**
+        // **Step 5.5: Clean JSON response before parsing**
         const match = aiBidRaw.match(/```json\n([\s\S]*?)\n```/);
         let aiBidClean = match ? match[1].trim() : aiBidRaw.trim();
 
@@ -122,12 +137,12 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             return null;
         }
 
-        // Step 5: Determine Bid Category
+        // Step 6: Determine Bid Category
         const bidCategory = ["photography", "videography"].includes(requestDetails.service_category.toLowerCase()) 
             ? "Photography" 
             : "General";
 
-        // **Step 6: Insert AI-generated bid into Supabase**
+        // **Step 7: Insert AI-generated bid into Supabase**
         const { error: insertError } = await supabase
             .from("bids")
             .insert([
