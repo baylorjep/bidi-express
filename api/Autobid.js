@@ -67,6 +67,7 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             - **Max Price:** $${pricingRules?.max_price ?? "N/A"}  
             - **Pricing Model:** ${pricingRules?.pricing_model ?? "Not specified"}  
             - **Hourly Rate (if applicable):** $${pricingRules?.hourly_rate ?? "N/A"}  
+            - **Default Message template (if applicable):** $${pricingRules?.default_message ?? "N/A"} 
             - **Additional Comments:** ${pricingRules?.additional_comments ?? "None"}  
             `
             : "This business has not set explicit pricing rules. Use past bids and industry norms to guide the bid.";
@@ -103,14 +104,24 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             - **Date Range:** ${requestDetails.service_date} - ${requestDetails.end_date}  
             - **Details:** ${requestDetails.service_description}  
 
-            ### **⚡ Bidding Strategy**
-            1. Base bid on **past similar jobs** when available.
-            2. Ensure bid follows **business’s pricing strategy and preferences**.
-            3. If no past bids or pricing preferences exist, estimate a **fair market bid**, and mention in the description that the price is subject to change.
-            4. Adjust price if **urgent or complex**.
-            5. Return **only JSON**, with no extra text.  
+            ### **⚡ Weighted Bidding Strategy**
+            1. **Start with the pricing rules first**:
+            - Base price: ${pricingRules.min_price}  
+            - Max price cap: ${pricingRules.max_price}  
+            - Per-person, per-hour, or flat-rate: ${pricingRules.pricing_model}  
+            - Rush fees, discounts, or special conditions: ${pricingRules.additional_comments}
 
-            **Return JSON format ONLY:**  
+            2. **Adjust bid using past successful bids:**
+            - Look at similar past jobs.
+            - Identify **what factors** caused past bids to be higher/lower.
+            - Modify bid accordingly **while staying within pricing constraints**.
+
+            3. **Final sanity check:**
+            - Ensure bid **isn't below min price** or **above max price**.
+            - Format bid description using **business's preferred message template**:
+                - Default template: "${pricingRules.default_message_template}"
+
+            4.  **Return JSON format ONLY:**  
             \`\`\`json
             {
                 "bidAmount": <calculated bid price>,
