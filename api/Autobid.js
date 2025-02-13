@@ -15,7 +15,7 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
                 bid_amount,
                 bid_description,
                 request_id,
-                requests(service_category, service_title, location, service_date, end_date, service_description)
+                requests:request_id(service_category, service_title, location, service_date, end_date, service_description)
             `)
             .eq("user_id", businessId)
             .order("created_at", { ascending: false })
@@ -47,7 +47,7 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             - **Hourly Rate (if applicable):** $${pricingRules.hourly_rate || "N/A"}  
             - **Additional Comments:** ${pricingRules.additional_comments || "None"}  
             `
-            : "No explicit pricing strategy provided.";
+            : "This business has not set explicit pricing rules. Use past bids and industry norms to guide the bid.";
 
       
 
