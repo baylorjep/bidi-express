@@ -643,7 +643,8 @@ app.post('/trigger-autobid', async (req, res) => {
 });
 
 // -----------------------------------------------------------------
-// SOCKET.IO INTEGRATION
+// SOCKET.IO INTEGRATION FOR PRIVATE MESSAGING
+
 // Create an HTTP server from the Express app
 const server = http.createServer(app);
 
@@ -655,16 +656,23 @@ const io = new Server(server, {
   },
 });
 
-// Socket.IO connection logic
+// Socket.IO connection logic for private messaging
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
+
+  // Listen for a "join" event to add the client to a room
+  // The client should send their user ID, so they join a room with that ID.
+  socket.on("join", (userId) => {
+    console.log(`User ${userId} joined room ${userId}`);
+    socket.join(userId);
+  });
 
   // Listen for "send_message" events from clients
   socket.on("send_message", async (data) => {
     console.log("Received message:", data);
     try {
       const { senderId, receiverId, message } = data;
-      // Persist the message in Supabase (like your HTTP /send-message endpoint)
+      // Persist the message in Supabase (similar to your /send-message HTTP endpoint)
       const { data: insertedData, error } = await supabase
         .from("messages")
         .insert([{ sender_id: senderId, receiver_id: receiverId, message }]);
@@ -672,8 +680,12 @@ io.on("connection", (socket) => {
         console.error("Error saving message:", error);
         return;
       }
-      // Broadcast the message to all connected clients
-      io.emit("receive_message", { ...data, id: insertedData[0].id });
+      const messageData = { ...data, id: insertedData[0].id };
+
+      // Emit the message only to the receiver's room
+      io.to(receiverId).emit("receive_message", messageData);
+      // Optionally, also send the message back to the sender's socket so their UI updates
+      socket.emit("receive_message", messageData);
     } catch (err) {
       console.error("Error handling send_message event:", err);
     }
@@ -686,7 +698,7 @@ io.on("connection", (socket) => {
 
 // -----------------------------------------------------------------
 // Start the HTTP server (with Socket.IO enabled)
-// For local development, listen on port 4242
+// For local development, listen on port 4242 (or change to your desired port)
 if (process.env.NODE_ENV !== "production") {
   server.listen(4242, () => {
     console.log("Node server listening on port 4242 with Socket.IO enabled! Visit http://localhost:4242");
