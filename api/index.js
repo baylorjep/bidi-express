@@ -102,7 +102,7 @@ app.post("/create-checkout-session", async (req, res) => {
     }
 
     // Calculate the 5% application fee from the business's portion
-    const applicationFeeAmount = Math.round(amount * 0.05); // 5% of the amount in cents
+    const applicationFeeAmount = Math.round(amount * 0.1); // 10% of the amount in cents
 
 
     // Create a Checkout session
