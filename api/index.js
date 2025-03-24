@@ -20,6 +20,9 @@ const { generateAutoBidForBusiness } = require('./Autobid');
 // Initialize Resend with the API key
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+const http = require("http");
+const { Server } = require("socket.io");
+
 
 // Set your Stripe secret key. Remember to switch to your live secret key in production.
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY,
@@ -639,6 +642,56 @@ app.post('/trigger-autobid', async (req, res) => {
   }
 });
 
+// -----------------------------------------------------------------
+// SOCKET.IO INTEGRATION
+// Create an HTTP server from the Express app
+const server = http.createServer(app);
+
+// Initialize Socket.IO with the same CORS settings
+const io = new Server(server, {
+  cors: {
+    origin: ["https://www.savewithbidi.com", "http://localhost:3000"],
+    methods: ["GET", "POST"],
+  },
+});
+
+// Socket.IO connection logic
+io.on("connection", (socket) => {
+  console.log("Socket connected:", socket.id);
+
+  // Listen for "send_message" events from clients
+  socket.on("send_message", async (data) => {
+    console.log("Received message:", data);
+    try {
+      const { senderId, receiverId, message } = data;
+      // Persist the message in Supabase (like your HTTP /send-message endpoint)
+      const { data: insertedData, error } = await supabase
+        .from("messages")
+        .insert([{ sender_id: senderId, receiver_id: receiverId, message }]);
+      if (error) {
+        console.error("Error saving message:", error);
+        return;
+      }
+      // Broadcast the message to all connected clients
+      io.emit("receive_message", { ...data, id: insertedData[0].id });
+    } catch (err) {
+      console.error("Error handling send_message event:", err);
+    }
+  });
+
+  socket.on("disconnect", () => {
+    console.log("Socket disconnected:", socket.id);
+  });
+});
+
+// -----------------------------------------------------------------
+// Start the HTTP server (with Socket.IO enabled)
+// For local development, listen on port 4242
+if (process.env.NODE_ENV !== "production") {
+  server.listen(4242, () => {
+    console.log("Node server listening on port 4242 with Socket.IO enabled! Visit http://localhost:4242");
+  });
+}
 
 module.exports = app; // Export for Vercel
 
