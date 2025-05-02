@@ -10,8 +10,8 @@ const bodyParser = require("body-parser");
 
 // Notifications
 
-const saveSubscriptionRoute = require("./api/save-subscription");
-const sendNotificationRoute = require("./api/send-notification");
+const saveSubscriptionRoute = require("./save-subscription");
+const sendNotificationRoute = require("./send-notification");
 
 // Resend declaration for emailing
 const { Resend } = require("resend");
