@@ -149,10 +149,10 @@ app.post("/create-checkout-session", async (req, res) => {
 });
 
 // Notification routes
-app.use("/api/save-subscription", saveSubscriptionRoute);
-app.use("/api/send-notification", sendNotificationRoute);
+app.post("/api/save-subscription", saveSubscriptionRoute);
+app.post("/api/send-notification", sendNotificationRoute);
 // Start server
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 4242;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
