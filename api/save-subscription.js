@@ -5,6 +5,12 @@ module.exports = async function (req, res) {
   const { user_id, subscription } = req.body;
 
   try {
+
+     // Log before saving to the database
+     console.log('Saving subscription for user_id:', user_id);
+     console.log('Subscription data:', subscription);
+ 
+
     // Insert or update the subscription data into the 'subscriptions' table
     const { error } = await supabase
       .from('subscriptions')

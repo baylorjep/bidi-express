@@ -1,3 +1,7 @@
+// dotenv
+
+require('dotenv').config();
+
 // express declarations
 const express = require("express");
 const app = express();
@@ -148,14 +152,16 @@ app.post("/create-checkout-session", async (req, res) => {
   }
 });
 
-// Notification routes
-app.post("/api/save-subscription", saveSubscriptionRoute);
-app.post("/api/send-notification", sendNotificationRoute);
-// Start server
 const PORT = process.env.PORT || 4242;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
+
+// Notification routes
+app.post("/api/save-subscription", saveSubscriptionRoute);
+app.post("/api/send-notification", sendNotificationRoute);
+// Start server
+
 
 console.log("baylor");
 
