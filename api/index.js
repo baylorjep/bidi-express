@@ -1,5 +1,3 @@
-
-
 // express declarations
 const express = require("express");
 const app = express();
@@ -10,10 +8,10 @@ const cors = require("cors");
 // body parser for parsing request bodies
 const bodyParser = require("body-parser");
 
-// Notifications 
+// Notifications
 
-const saveSubscriptionRoute = require('./api/save-subscription');
-const sendNotificationRoute = require('./api/send-notification');
+const saveSubscriptionRoute = require("./api/save-subscription");
+const sendNotificationRoute = require("./api/send-notification");
 
 // Resend declaration for emailing
 const { Resend } = require("resend");
@@ -23,7 +21,6 @@ const supabase = require("./supabaseClient");
 
 // OpenAI declaration for AI
 const { generateAutoBidForBusiness } = require("./Autobid");
-
 
 // Initialize Resend with the API key
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -151,16 +148,16 @@ app.post("/create-checkout-session", async (req, res) => {
   }
 });
 
-
 // Notification routes
-app.use('/api/save-subscription', saveSubscriptionRoute);
-app.use('/api/send-notification', sendNotificationRoute);
+app.use("/api/save-subscription", saveSubscriptionRoute);
+app.use("/api/send-notification", sendNotificationRoute);
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
 
+console.log("baylor");
 
 // Serve static files only if the frontend is hosted from the same project
 // If you're hosting the frontend separately, you can remove this
