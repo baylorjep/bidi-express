@@ -1,30 +1,21 @@
-// dotenv
-
-require('dotenv').config();
-
 // express declarations
 const express = require("express");
 const app = express();
 
 // cors for cross origin resource sharing
-const cors = require("cors");
+const cors = require("cors"); 
 
 // body parser for parsing request bodies
-const bodyParser = require("body-parser");
-
-// Notifications
-
-const saveSubscriptionRoute = require("./save-subscription");
-const sendNotificationRoute = require("./send-notification");
+const bodyParser = require('body-parser');
 
 // Resend declaration for emailing
-const { Resend } = require("resend");
+const { Resend } = require('resend');
 
 // supabase declaration for dbm
-const supabase = require("./supabaseClient");
+const supabase = require('./supabaseClient');
 
 // OpenAI declaration for AI
-const { generateAutoBidForBusiness } = require("./Autobid");
+const { generateAutoBidForBusiness } = require('./Autobid');
 
 // Initialize Resend with the API key
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -32,25 +23,28 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 const http = require("http");
 const { Server } = require("socket.io");
 
+
 // Set your Stripe secret key. Remember to switch to your live secret key in production.
-const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: "2023-10-16",
-});
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY,
+  {
+    apiVersion: "2023-10-16",
+  }
+);
+
 
 // Enable CORS with the frontend's URL to allow api requests from the site
-app.use(
-  cors({
-    origin: ["https://www.savewithbidi.com", "http://localhost:3000"], // Replace with your actual frontend URL
-    methods: ["GET", "POST"], // Specify allowed methods
-    credentials: true, // If needed (e.g., for cookies)
-  })
-);
+app.use(cors({
+  origin: ['https://www.savewithbidi.com', 'http://localhost:3000'], // Replace with your actual frontend URL
+  methods: ['GET', 'POST'], // Specify allowed methods
+  credentials: true, // If needed (e.g., for cookies)
+}));
 
 app.use(express.json());
 
 // basic page
 
 app.get("/", (req, res) => res.send("Bidi Express on Vercel"));
+
 
 // This is the endpoint to create an account session for Stripe onboarding
 app.post("/account_session", async (req, res) => {
@@ -113,15 +107,16 @@ app.post("/create-checkout-session", async (req, res) => {
     // Calculate the 5% application fee from the business's portion
     const applicationFeeAmount = Math.round(amount * 0.1); // 10% of the amount in cents
 
+
     // Create a Checkout session
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
+      payment_method_types: ['card'],
       line_items: [
         {
           price_data: {
-            currency: "usd",
+            currency: 'usd',
             product_data: {
-              name: serviceName,
+              name: serviceName, 
             },
             unit_amount: amount, // Price in cents (e.g., 5000 for $50)
           },
@@ -133,10 +128,11 @@ app.post("/create-checkout-session", async (req, res) => {
         transfer_data: {
           destination: connectedAccountId, // businesses connected account ID
         },
+        
       },
-      mode: "payment",
-      ui_mode: "embedded",
-      return_url: "https://www.savewithbidi.com/payment-status",
+      mode: 'payment',
+      ui_mode: 'embedded',
+      return_url: 'https://www.savewithbidi.com/payment-status',
     });
 
     console.log("Checkout session created:", session); // Log the session data
@@ -152,35 +148,22 @@ app.post("/create-checkout-session", async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 4242;
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
-
-// Notification routes
-app.post("/api/save-subscription", saveSubscriptionRoute);
-app.post("/api/send-notification", sendNotificationRoute);
-// Start server
-
-
-console.log("baylor");
-
 // Serve static files only if the frontend is hosted from the same project
 // If you're hosting the frontend separately, you can remove this
 
-app.post("/check-payment-status", async (req, res) => {
+app.post('/check-payment-status', async (req, res) => {
   const { paymentIntentId } = req.body;
 
   try {
     const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
-
-    if (paymentIntent.status === "succeeded") {
+    
+    if (paymentIntent.status === 'succeeded') {
       res.json({ success: true });
     } else {
       res.json({ success: false });
     }
   } catch (error) {
-    console.error("Error checking payment status:", error);
+    console.error('Error checking payment status:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -198,16 +181,15 @@ app.post("/create-login-link", async (req, res) => {
 });
 
 // For local development, you can still listen on a port
-if (process.env.NODE_ENV !== "production") {
+if (process.env.NODE_ENV !== 'production') {
   app.listen(4242, () => {
-    console.log(
-      "Node server listening on port 4242! Visit http://localhost:4242"
-    );
+    console.log("Node server listening on port 4242! Visit http://localhost:4242");
   });
 }
 
+
 // Endpoint to check connected account capabilities
-app.get("/check-account-capabilities/:accountId", async (req, res) => {
+app.get('/check-account-capabilities/:accountId', async (req, res) => {
   const { accountId } = req.params;
 
   try {
@@ -218,7 +200,7 @@ app.get("/check-account-capabilities/:accountId", async (req, res) => {
       capabilities: account.capabilities,
     });
   } catch (error) {
-    console.error("Error retrieving account:", error);
+    console.error('Error retrieving account:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -228,47 +210,43 @@ app.get("/check-account-capabilities/:accountId", async (req, res) => {
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
 // Webhook endpoint
-app.post(
-  "/webhook",
-  bodyParser.raw({ type: "application/json" }),
-  (req, res) => {
-    const sig = req.headers["stripe-signature"];
+app.post('/webhook', bodyParser.raw({ type: 'application/json' }), (req, res) => {
+  const sig = req.headers['stripe-signature'];
 
-    let event;
+  let event;
 
-    try {
-      // Verify the event using the Stripe webhook secret
-      event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
-    } catch (err) {
-      console.error("Webhook signature verification failed.", err.message);
-      return res.status(400).send(`Webhook Error: ${err.message}`);
-    }
-
-    // Handle the event
-    switch (event.type) {
-      case "checkout.session.completed":
-        const session = event.data.object;
-        handleCheckoutSessionCompleted(session);
-        break;
-
-      case "payment_intent.succeeded":
-        const paymentIntent = event.data.object;
-        handlePaymentIntentSucceeded(paymentIntent);
-        break;
-
-      case "payment_intent.payment_failed":
-        const failedPaymentIntent = event.data.object;
-        handlePaymentIntentFailed(failedPaymentIntent);
-        break;
-
-      default:
-        console.warn(`Unhandled event type ${event.type}`);
-    }
-
-    // Return a response to acknowledge receipt of the event()
-    res.json({ received: true });
+  try {
+    // Verify the event using the Stripe webhook secret
+    event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+  } catch (err) {
+    console.error('Webhook signature verification failed.', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
   }
-);
+
+  // Handle the event
+  switch (event.type) {
+    case 'checkout.session.completed':
+      const session = event.data.object;
+      handleCheckoutSessionCompleted(session);
+      break;
+
+    case 'payment_intent.succeeded':
+      const paymentIntent = event.data.object;
+      handlePaymentIntentSucceeded(paymentIntent);
+      break;
+
+    case 'payment_intent.payment_failed':
+      const failedPaymentIntent = event.data.object;
+      handlePaymentIntentFailed(failedPaymentIntent);
+      break;
+
+    default:
+      console.warn(`Unhandled event type ${event.type}`);
+  }
+
+  // Return a response to acknowledge receipt of the event()
+  res.json({ received: true });
+});
 
 // Define functions to handle specific events
 async function handleCheckoutSessionCompleted(session) {
@@ -278,28 +256,23 @@ async function handleCheckoutSessionCompleted(session) {
     const bidId = session.metadata.bid_id; // Assuming you passed bid_id as metadata
     const amount = session.amount_total;
 
-    console.log(
-      `Checkout session completed for amount ${amount} to account ${connectedAccountId} for bidID ${bidId}`
-    );
+    console.log(`Checkout session completed for amount ${amount} to account ${connectedAccountId} for bidID ${bidId}`);
 
     // Update the bid status to 'paid' in your Supabase database
     const { data, error } = await supabase
-      .from("bids")
-      .update({ status: "paid" })
-      .eq("id", bidId);
+      .from('bids')
+      .update({ status: 'paid' })
+      .eq('id', bidId);
 
     if (error) {
-      console.error("Error updating bid status:", error.message);
+      console.error('Error updating bid status:', error.message);
     } else {
       console.log(`Bid ${bidId} status updated to 'paid'`);
     }
   } catch (error) {
-    console.error(
-      "Error in handleCheckoutSessionCompleted function:",
-      error.message
-    );
+    console.error('Error in handleCheckoutSessionCompleted function:', error.message);
   }
-}
+  }
 
 async function handlePaymentIntentSucceeded(paymentIntent) {
   console.log(`PaymentIntent for ${paymentIntent.amount} was successful!`);
@@ -317,84 +290,86 @@ async function handlePaymentIntentFailed(paymentIntent) {
 
 // Nodemailer SMTP/email setup
 
-const SibApiV3Sdk = require("sib-api-v3-sdk");
+const SibApiV3Sdk = require('sib-api-v3-sdk');
+
 
 // Initialize Brevo client
 const defaultClient = SibApiV3Sdk.ApiClient.instance;
-const apiKey = defaultClient.authentications["api-key"];
+const apiKey = defaultClient.authentications['api-key'];
 apiKey.apiKey = process.env.BREVO_API_KEY; // Store your API key securely
 
 // Middleware
 app.use(bodyParser.json());
 
+
 // Function to send an email via Brevo
 const sendEmailNotification = async (recipientEmail, subject, htmlContent) => {
-  try {
-    const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
-    const sendSmtpEmail = new SibApiV3Sdk.SendSmtpEmail({
-      to: [{ email: recipientEmail }],
-      sender: { name: "Bidi", email: "savewithbidi@gmail.com" },
-      subject: subject,
-      htmlContent: htmlContent,
-    });
+    try {
+        const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
+        const sendSmtpEmail = new SibApiV3Sdk.SendSmtpEmail({
+            to: [{ email: recipientEmail }],
+            sender: { name: 'Bidi', email: 'savewithbidi@gmail.com' },
+            subject: subject,
+            htmlContent: htmlContent
+        });
 
-    const data = await apiInstance.sendTransacEmail(sendSmtpEmail);
-    console.log("API called successfully. Returned data: " + data);
-  } catch (error) {
-    console.error("Error sending email:", error);
-  }
+        const data = await apiInstance.sendTransacEmail(sendSmtpEmail);
+        console.log('API called successfully. Returned data: ' + data);
+    } catch (error) {
+        console.error('Error sending email:', error);
+    }
 };
 
 // Endpoint for sending email notifications
-app.post("/send-email", async (req, res) => {
-  const { recipientEmail, subject, htmlContent } = req.body;
+app.post('/send-email', async (req, res) => {
+    const { recipientEmail, subject, htmlContent } = req.body;
 
-  try {
-    await sendEmailNotification(recipientEmail, subject, htmlContent);
-    res.status(200).send("Email sent successfully");
-  } catch (error) {
-    res.status(500).send("Error sending email: " + error.message);
-  }
+    try {
+        await sendEmailNotification(recipientEmail, subject, htmlContent);
+        res.status(200).send('Email sent successfully');
+    } catch (error) {
+        res.status(500).send('Error sending email: ' + error.message);
+    }
 });
 
-app.post("/create-plus-checkout-session", async (req, res) => {
+app.post('/create-plus-checkout-session', async (req, res) => {
   const { userId } = req.body; // Pass the user ID from the frontend
 
   if (!userId) {
-    return res.status(400).json({ error: "User ID is required" });
+      return res.status(400).json({ error: 'User ID is required' });
   }
 
   try {
-    // Create a Stripe Checkout session
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
-      mode: "subscription",
-      line_items: [
-        {
-          price: "price_1QNIzyF25aBU3RMPEpbxhWN7", // Your Stripe Price ID
-          quantity: 1,
-        },
-      ],
-      customer_email: req.body.email, // Optional if you want to link it to an email
-      metadata: {
-        userId, // Pass the userId as metadata for the webhook
-      },
-      success_url:
-        "https://www.savewithbidi.com/success?session_id={CHECKOUT_SESSION_ID}",
-      cancel_url: "https://www.savewithbidi.com/cancel",
-    });
+      // Create a Stripe Checkout session
+      const session = await stripe.checkout.sessions.create({
+          payment_method_types: ['card'],
+          mode: 'subscription',
+          line_items: [
+              {
+                  price: 'price_1QNIzyF25aBU3RMPEpbxhWN7', // Your Stripe Price ID
+                  quantity: 1,
+              },
+          ],
+          customer_email: req.body.email, // Optional if you want to link it to an email
+          metadata: {
+              userId, // Pass the userId as metadata for the webhook
+          },
+          success_url: 'https://www.savewithbidi.com/success?session_id={CHECKOUT_SESSION_ID}',
+          cancel_url: 'https://www.savewithbidi.com/cancel',
+      });
 
-    // Return the session URL
-    res.json({ url: session.url });
+      // Return the session URL
+      res.json({ url: session.url });
   } catch (error) {
-    console.error("Error creating checkout session:", error.message);
-    res.status(500).json({ error: error.message });
+      console.error('Error creating checkout session:', error.message);
+      res.status(500).json({ error: error.message });
   }
 });
 
+
 // Resend email endpoint
 
-app.post("/send-resend-email", async (req, res) => {
+app.post('/send-resend-email', async (req, res) => {
   const { category } = req.body;
 
   if (!category) {
@@ -404,55 +379,42 @@ app.post("/send-resend-email", async (req, res) => {
   try {
     // Fetch user IDs matching the category from `business_profiles`
     const { data: users, error: usersError } = await supabase
-      .from("business_profiles")
-      .select("id")
-      .eq("business_category", category);
+      .from('business_profiles')
+      .select('id')
+      .eq('business_category', category);
 
     if (usersError) {
       console.error("Error fetching users by category:", usersError.message);
-      return res
-        .status(500)
-        .json({ error: "Failed to fetch users by category." });
+      return res.status(500).json({ error: "Failed to fetch users by category." });
     }
 
     if (!users || users.length === 0) {
-      return res
-        .status(404)
-        .json({ error: `No users found in category: ${category}.` });
+      return res.status(404).json({ error: `No users found in category: ${category}.` });
     }
-    console.log(
-      `Users retrieved from business_profiles:`,
-      users.map((u) => u.id)
-    );
+    console.log(`Users retrieved from business_profiles:`, users.map(u => u.id));
 
     // Extract user IDs
-    const userIds = users.map((user) => user.id);
+    const userIds = users.map(user => user.id);
 
     // Fetch emails for these user IDs from the `profiles` table
     const { data: emails, error: emailsError } = await supabase
-      .from("profiles")
-      .select("email")
-      .in("id", userIds);
+      .from('profiles')
+      .select('email')
+      .in('id', userIds);
 
     if (emailsError) {
       console.error("Error fetching emails:", emailsError.message);
-      return res
-        .status(500)
-        .json({ error: "Failed to fetch emails for users." });
+      return res.status(500).json({ error: "Failed to fetch emails for users." });
     }
 
     if (!emails || emails.length === 0) {
-      return res
-        .status(404)
-        .json({ error: `No emails found for users in category: ${category}.` });
+      return res.status(404).json({ error: `No emails found for users in category: ${category}.` });
     }
     console.log("Emails retrieved from profiles:", emails);
 
-    const validEmails = emails.map((e) => e.email).filter((email) => email); // Ensure no null values
+    const validEmails = emails.map(e => e.email).filter(email => email); // Ensure no null values
 
-    console.log(
-      `📩 Sending emails to ${validEmails.length} users in category: ${category}`
-    );
+    console.log(`📩 Sending emails to ${validEmails.length} users in category: ${category}`);
 
     // **Batch Processing to Avoid Rate Limit**
     const batchSize = 2; // Resend allows 2 requests per second
@@ -475,17 +437,14 @@ app.post("/send-resend-email", async (req, res) => {
 
           try {
             await resend.emails.send({
-              from: "noreply@savewithbidi.com",
+              from: 'noreply@savewithbidi.com',
               to: email,
               subject,
               html: htmlContent,
             });
             console.log(`✅ Email sent to: ${email}`);
           } catch (emailError) {
-            console.error(
-              `❌ Failed to send email to ${email}:`,
-              emailError.message
-            );
+            console.error(`❌ Failed to send email to ${email}:`, emailError.message);
           }
         })
       );
@@ -499,26 +458,21 @@ app.post("/send-resend-email", async (req, res) => {
     }
 
     console.log(`✅ All emails sent successfully for category: ${category}`);
-    res.status(200).json({
-      message: `Emails sent successfully to all users in category: ${category}.`,
-    });
+    res.status(200).json({ message: `Emails sent successfully to all users in category: ${category}.` });
+
   } catch (error) {
     console.error("Error sending emails:", error.message);
-    res
-      .status(500)
-      .json({ error: "Failed to send emails.", details: error.message });
+    res.status(500).json({ error: "Failed to send emails.", details: error.message });
   }
 });
 
 //Bid Notifications
 
-app.post("/send-bid-notification", async (req, res) => {
+app.post('/send-bid-notification', async (req, res) => {
   const { requestId } = req.body;
 
   if (!requestId) {
-    return res
-      .status(400)
-      .json({ error: "Missing required field: requestId." });
+    return res.status(400).json({ error: "Missing required field: requestId." });
   }
 
   try {
@@ -526,27 +480,23 @@ app.post("/send-bid-notification", async (req, res) => {
 
     // First, check the `photography_requests` table
     let { data: requestOwner, error: photoError } = await supabase
-      .from("photography_requests")
-      .select("profile_id")
-      .eq("id", requestId)
+      .from('photography_requests')
+      .select('profile_id')
+      .eq('id', requestId)
       .single();
 
     if (!requestOwner || photoError) {
-      console.log(
-        `❌ Not found in photography_requests. Checking requests table...`
-      );
+      console.log(`❌ Not found in photography_requests. Checking requests table...`);
 
       // If not found, check `requests` table
       const { data: generalRequestOwner, error: requestError } = await supabase
-        .from("requests")
-        .select("user_id")
-        .eq("id", requestId)
+        .from('requests')
+        .select('user_id')
+        .eq('id', requestId)
         .single();
 
       if (requestError || !generalRequestOwner) {
-        console.error(
-          `❌ No matching request found for request ID: ${requestId}`
-        );
+        console.error(`❌ No matching request found for request ID: ${requestId}`);
         return res.status(404).json({ error: "No matching request found." });
       }
 
@@ -557,9 +507,9 @@ app.post("/send-bid-notification", async (req, res) => {
 
     // Fetch user email from `profiles`
     const { data: userProfile, error: profileError } = await supabase
-      .from("profiles")
-      .select("email")
-      .eq("id", requestOwner.profile_id)
+      .from('profiles')
+      .select('email')
+      .eq('id', requestOwner.profile_id)
       .single();
 
     if (profileError || !userProfile?.email) {
@@ -583,7 +533,7 @@ app.post("/send-bid-notification", async (req, res) => {
 
     // Send email using Resend
     await resend.emails.send({
-      from: "noreply@savewithbidi.com",
+      from: 'noreply@savewithbidi.com',
       to: recipientEmail,
       subject,
       html: htmlContent,
@@ -591,12 +541,10 @@ app.post("/send-bid-notification", async (req, res) => {
 
     console.log(`✅ Email sent successfully to: ${recipientEmail}`);
     res.status(200).json({ message: "Email sent successfully." });
+
   } catch (error) {
     console.error("❌ Error sending email notification:", error.message);
-    res.status(500).json({
-      error: "Failed to send email notification.",
-      details: error.message,
-    });
+    res.status(500).json({ error: "Failed to send email notification.", details: error.message });
   }
 });
 
@@ -609,9 +557,9 @@ app.post("/send-message", async (req, res) => {
   }
 
   try {
-    const { data, error } = await supabase
-      .from("messages")
-      .insert([{ sender_id: senderId, receiver_id: receiverId, message }]);
+    const { data, error } = await supabase.from("messages").insert([
+      { sender_id: senderId, receiver_id: receiverId, message },
+    ]);
 
     if (error) {
       console.error("Error sending message:", error);
@@ -627,85 +575,70 @@ app.post("/send-message", async (req, res) => {
 
 // Autobidding API
 
-app.post("/trigger-autobid", async (req, res) => {
+app.post('/trigger-autobid', async (req, res) => {
   const { request_id } = req.body;
 
   if (!request_id) {
-    return res
-      .status(400)
-      .json({ error: "Missing required field: request_id." });
+      return res.status(400).json({ error: "Missing required field: request_id." });
   }
 
   try {
-    console.log(`🆕 Auto-bid triggered for Request ID: ${request_id}`);
+      console.log(`🆕 Auto-bid triggered for Request ID: ${request_id}`);
 
-    // Fetch request details using correct column names
-    const { data: requestDetails, error: requestError } = await supabase
-      .from("requests")
-      .select(
-        "id, service_category, service_title, location, service_date, end_date, service_description"
-      )
-      .eq("id", request_id)
-      .single();
+      // Fetch request details using correct column names
+      const { data: requestDetails, error: requestError } = await supabase
+          .from("requests")
+          .select("id, service_category, service_title, location, service_date, end_date, service_description")
+          .eq("id", request_id)
+          .single();
 
-    if (requestError || !requestDetails) {
-      console.error(`❌ Error fetching request details:`, requestError);
-      return res.status(404).json({ error: "Request not found." });
-    }
-
-    console.log(`🔍 Retrieved request details:`, requestDetails);
-
-    // Find businesses with Auto-Bidding enabled
-    const { data: autoBidBusinesses, error: businessError } = await supabase
-      .from("business_profiles")
-      .select("id, autobid_enabled, business_category")
-      .eq("autobid_enabled", true);
-
-    if (businessError) {
-      console.error("❌ Error fetching businesses:", businessError.message);
-      return res.status(500).json({ error: "Failed to fetch businesses." });
-    }
-
-    // Filter businesses to only include those whose category matches the request's category
-    const eligibleBusinesses = autoBidBusinesses.filter(
-      (business) =>
-        business.business_category.toLowerCase() ===
-        requestDetails.service_category.toLowerCase()
-    );
-
-    console.log(
-      `🔍 Found ${eligibleBusinesses.length} eligible businesses for category: ${requestDetails.service_category}`
-    );
-
-    let bidsGenerated = [];
-
-    for (const business of eligibleBusinesses) {
-      const autoBid = await generateAutoBidForBusiness(
-        business.id,
-        requestDetails
-      );
-      if (autoBid) {
-        console.log(
-          `🚀 Auto-bid generated for Business ${business.id}:`,
-          autoBid
-        );
-        bidsGenerated.push({
-          business_id: business.id,
-          bid_amount: autoBid.bidAmount,
-          bid_description: autoBid.bidDescription,
-        });
+      if (requestError || !requestDetails) {
+          console.error(`❌ Error fetching request details:`, requestError);
+          return res.status(404).json({ error: "Request not found." });
       }
-    }
 
-    res.status(200).json({
-      message: "Auto-bids generated successfully (LOG ONLY, NO INSERTION)",
-      bids: bidsGenerated,
-    });
+      console.log(`🔍 Retrieved request details:`, requestDetails);
+
+      // Find businesses with Auto-Bidding enabled
+      const { data: autoBidBusinesses, error: businessError } = await supabase
+          .from("business_profiles")
+          .select("id, autobid_enabled, business_category")
+          .eq("autobid_enabled", true);
+
+      if (businessError) {
+          console.error("❌ Error fetching businesses:", businessError.message);
+          return res.status(500).json({ error: "Failed to fetch businesses." });
+      }
+
+      // Filter businesses to only include those whose category matches the request's category
+      const eligibleBusinesses = autoBidBusinesses.filter(business =>
+        business.business_category.toLowerCase() === requestDetails.service_category.toLowerCase()
+      );
+
+      console.log(`🔍 Found ${eligibleBusinesses.length} eligible businesses for category: ${requestDetails.service_category}`);
+
+      let bidsGenerated = [];
+
+      for (const business of eligibleBusinesses) {
+        const autoBid = await generateAutoBidForBusiness(business.id, requestDetails);
+        if (autoBid) {
+            console.log(`🚀 Auto-bid generated for Business ${business.id}:`, autoBid);
+            bidsGenerated.push({
+                business_id: business.id,
+                bid_amount: autoBid.bidAmount,
+                bid_description: autoBid.bidDescription,
+            });
+        }
+      }
+
+      res.status(200).json({
+          message: "Auto-bids generated successfully (LOG ONLY, NO INSERTION)",
+          bids: bidsGenerated,
+      });
+
   } catch (error) {
-    console.error("❌ Error triggering auto-bid:", error.message);
-    res
-      .status(500)
-      .json({ error: "Failed to trigger auto-bid.", details: error.message });
+      console.error("❌ Error triggering auto-bid:", error.message);
+      res.status(500).json({ error: "Failed to trigger auto-bid.", details: error.message });
   }
 });
 
@@ -762,10 +695,10 @@ io.on("connection", (socket) => {
 // production testing
 if (process.env.NODE_ENV !== "production") {
   server.listen(4242, () => {
-    console.log(
-      "Node server listening on port 4242 with Socket.IO enabled! Visit http://localhost:4242"
-    );
+    console.log("Node server listening on port 4242 with Socket.IO enabled! Visit http://localhost:4242");
   });
 }
 
 module.exports = app; // Export for Vercel
+
+
