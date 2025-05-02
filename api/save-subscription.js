@@ -1,5 +1,5 @@
 // api/save-subscription.js
-const { supabase } = require('../supabaseClient');
+const { supabase } = require('./supabaseClient');
 
 module.exports = async function (req, res) {
   const { user_id, subscription } = req.body;

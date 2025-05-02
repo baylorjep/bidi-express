@@ -1,6 +1,6 @@
 // api/send-notification.js
 const webpush = require("web-push");
-const { supabase } = require("../supabaseClient");
+const { supabase } = require("./supabaseClient");
 
 // Configure your VAPID keys for sending notifications
 webpush.setVapidDetails(
