@@ -1,3 +1,21 @@
+// Fix for debug module in serverless environment
+const path = require('path');
+const fs = require('fs');
+
+// Create the common.js file if it doesn't exist
+const debugPath = path.join(__dirname, '../node_modules/debug/src');
+const commonPath = path.join(debugPath, 'common.js');
+
+if (!fs.existsSync(commonPath)) {
+    const commonContent = `
+    module.exports = {
+        humanize: require('ms'),
+        supportsColor: () => false
+    };
+    `;
+    fs.writeFileSync(commonPath, commonContent);
+}
+
 require('dotenv').config(); // Load environment variables
 const express = require("express");
 const app = express();
@@ -26,14 +44,12 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 const http = require("http");
 const { Server } = require("socket.io");
 
-
 // Set your Stripe secret key. Remember to switch to your live secret key in production.
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY,
   {
     apiVersion: "2023-10-16",
   }
 );
-
 
 // Enable CORS with the frontend's URL to allow api requests from the site
 app.use(cors({
@@ -48,9 +64,7 @@ app.use(express.json());
 app.use('/api/calendar', googleCalendarRoutes);
 
 // basic page
-
 app.get("/", (req, res) => res.send("Bidi Express on Vercel"));
-
 
 // This is the endpoint to create an account session for Stripe onboarding
 app.post("/account_session", async (req, res) => {
@@ -113,7 +127,6 @@ app.post("/create-checkout-session", async (req, res) => {
     // Calculate the 5% application fee from the business's portion
     const applicationFeeAmount = Math.round(amount * 0.1); // 10% of the amount in cents
 
-
     // Create a Checkout session
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -134,7 +147,6 @@ app.post("/create-checkout-session", async (req, res) => {
         transfer_data: {
           destination: connectedAccountId, // businesses connected account ID
         },
-        
       },
       mode: 'payment',
       ui_mode: 'embedded',
@@ -153,9 +165,6 @@ app.post("/create-checkout-session", async (req, res) => {
     res.status(500).send({ error: error.message });
   }
 });
-
-// Serve static files only if the frontend is hosted from the same project
-// If you're hosting the frontend separately, you can remove this
 
 app.post('/check-payment-status', async (req, res) => {
   const { paymentIntentId } = req.body;
@@ -192,7 +201,6 @@ if (process.env.NODE_ENV !== 'production') {
     console.log("Node server listening on port 4242! Visit http://localhost:4242");
   });
 }
-
 
 // Endpoint to check connected account capabilities
 app.get('/check-account-capabilities/:accountId', async (req, res) => {
@@ -278,7 +286,7 @@ async function handleCheckoutSessionCompleted(session) {
   } catch (error) {
     console.error('Error in handleCheckoutSessionCompleted function:', error.message);
   }
-  }
+}
 
 async function handlePaymentIntentSucceeded(paymentIntent) {
   console.log(`PaymentIntent for ${paymentIntent.amount} was successful!`);
@@ -295,9 +303,7 @@ async function handlePaymentIntentFailed(paymentIntent) {
 }
 
 // Nodemailer SMTP/email setup
-
 const SibApiV3Sdk = require('sib-api-v3-sdk');
-
 
 // Initialize Brevo client
 const defaultClient = SibApiV3Sdk.ApiClient.instance;
@@ -306,7 +312,6 @@ apiKey.apiKey = process.env.BREVO_API_KEY; // Store your API key securely
 
 // Middleware
 app.use(bodyParser.json());
-
 
 // Function to send an email via Brevo
 const sendEmailNotification = async (recipientEmail, subject, htmlContent) => {
@@ -372,9 +377,7 @@ app.post('/create-plus-checkout-session', async (req, res) => {
   }
 });
 
-
 // Resend email endpoint
-
 app.post('/send-resend-email', async (req, res) => {
   const { category } = req.body;
 
@@ -473,7 +476,6 @@ app.post('/send-resend-email', async (req, res) => {
 });
 
 //Bid Notifications
-
 app.post('/send-bid-notification', async (req, res) => {
   const { requestId } = req.body;
 
@@ -580,7 +582,6 @@ app.post("/send-message", async (req, res) => {
 });
 
 // Autobidding API
-
 app.post('/trigger-autobid', async (req, res) => {
   const { request_id } = req.body;
 
@@ -628,7 +629,7 @@ app.post('/trigger-autobid', async (req, res) => {
       for (const business of eligibleBusinesses) {
         const autoBid = await generateAutoBidForBusiness(business.id, requestDetails);
         if (autoBid) {
-            console.log(`🚀 Auto-bid generated for Business ${business.id}:`, autoBid);
+            console.log(`�� Auto-bid generated for Business ${business.id}:`, autoBid);
             bidsGenerated.push({
                 business_id: business.id,
                 bid_amount: autoBid.bidAmount,
@@ -698,6 +699,7 @@ io.on("connection", (socket) => {
     console.log("Socket disconnected:", socket.id);
   });
 });
+
 // production testing
 if (process.env.NODE_ENV !== "production") {
   server.listen(5000, () => {
