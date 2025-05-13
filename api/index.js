@@ -1,4 +1,4 @@
-// express declarations
+require('dotenv').config(); // Load environment variables
 const express = require("express");
 const app = express();
 
@@ -16,6 +16,9 @@ const supabase = require('./supabaseClient');
 
 // OpenAI declaration for AI
 const { generateAutoBidForBusiness } = require('./Autobid');
+
+// Google Calendar routes
+const googleCalendarRoutes = require('./google-calendar/routes');
 
 // Initialize Resend with the API key
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -35,11 +38,14 @@ const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY,
 // Enable CORS with the frontend's URL to allow api requests from the site
 app.use(cors({
   origin: ['https://www.savewithbidi.com', 'http://localhost:3000'], // Replace with your actual frontend URL
-  methods: ['GET', 'POST'], // Specify allowed methods
+  methods: ['GET', 'POST', 'PUT', 'DELETE'], // Updated to include all methods
   credentials: true, // If needed (e.g., for cookies)
 }));
 
 app.use(express.json());
+
+// Mount Google Calendar routes
+app.use('/api/calendar', googleCalendarRoutes);
 
 // basic page
 
@@ -679,7 +685,7 @@ io.on("connection", (socket) => {
       }
       const messageData = { ...data, id: insertedData[0].id };
 
-      // Send the message only to the intended receiver’s room
+      // Send the message only to the intended receiver's room
       io.to(receiverId).emit("receive_message", messageData);
       // Optionally, update the sender's UI as well
       socket.emit("receive_message", messageData);
@@ -694,7 +700,7 @@ io.on("connection", (socket) => {
 });
 // production testing
 if (process.env.NODE_ENV !== "production") {
-  server.listen(4242, () => {
+  server.listen(5000, () => {
     console.log("Node server listening on port 4242 with Socket.IO enabled! Visit http://localhost:4242");
   });
 }
