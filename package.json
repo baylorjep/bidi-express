@@ -4,11 +4,13 @@
   "description": "",
   "main": "index.js",
   "engines": {
-    "node": "18.x"
+    "node": ">=18.0.0"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node api/index.js"
+    "start": "node api/index.js",
+    "vercel-build": "npm install",
+    "postinstall": "npm rebuild"
   },
   "keywords": [],
   "author": "",
@@ -23,7 +25,8 @@
     "extend-node": "^0.0.1",
     "google-auth-library": "^9.15.1",
     "googleapis": "^148.0.0",
-    "gopd": "1.0.1",
+    "gopd": "^1.0.1",
+    "iconv-lite": "^0.6.3",
     "nodemailer": "^6.10.1",
     "openai": "^4.98.0",
     "qs": "^6.13.0",
@@ -33,5 +36,12 @@
     "stripe": "^16.12.0",
     "twilio": "^5.6.1",
     "web-push": "^3.6.7"
+  },
+  "peerDependencies": {
+    "node": ">=18.0.0"
+  },
+  "resolutions": {
+    "gopd": "^1.0.1",
+    "extend-node": "^0.0.1"
   }
 }
