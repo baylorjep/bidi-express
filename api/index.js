@@ -49,6 +49,28 @@ app.use(express.json());
 // Mount Google Calendar routes
 app.use('/api/calendar', googleCalendarRoutes);
 
+// Business Profile routes
+app.get('/api/business-profiles/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { data, error } = await supabase
+      .from('business_profiles')
+      .select('*')
+      .eq('id', id)
+      .single();
+    
+    if (error) throw error;
+    if (!data) {
+      return res.status(404).json({ error: 'Business profile not found' });
+    }
+    
+    res.json(data);
+  } catch (error) {
+    console.error('Error fetching business profile:', error);
+    res.status(500).json({ error: 'Failed to fetch business profile' });
+  }
+});
+
 // basic page
 app.get("/", (req, res) => res.send("Bidi Express on Vercel"));
 
@@ -689,7 +711,7 @@ io.on("connection", (socket) => {
 // production testing
 if (process.env.NODE_ENV !== "production") {
   server.listen(5000, () => {
-    console.log("Node server listening on port 4242 with Socket.IO enabled! Visit http://localhost:4242");
+    console.log("Node server listening on port 4242 with Socket.IO enabled! Visit http://localhost:5000");
   });
 }
 

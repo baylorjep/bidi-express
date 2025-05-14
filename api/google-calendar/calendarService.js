@@ -56,8 +56,7 @@ class GoogleCalendarService {
     this.oauth2Client.setCredentials(business.google_calendar_token);
     return google.calendar({ version: 'v3', auth: this.oauth2Client });
   }
-
-  // Check calendar availability
+  // Check calendar availability and return available time slots
   async checkAvailability(businessId, date) {
     try {
       const calendar = await this.getCalendarClient(businessId);
@@ -65,6 +64,8 @@ class GoogleCalendarService {
       startOfDay.setHours(0, 0, 0, 0);
       const endOfDay = new Date(date);
       endOfDay.setHours(23, 59, 59, 999);
+
+      // Get busy slots from Google Calendar
       const response = await calendar.events.list({
         calendarId: 'primary',
         timeMin: startOfDay.toISOString(),
@@ -72,23 +73,92 @@ class GoogleCalendarService {
         singleEvents: true,
         orderBy: 'startTime'
       });
-      return response.data.items;
+
+      const busySlots = response.data.items;
+      const availableSlots = [];
+
+      // Generate all possible 30-minute slots for the day
+      const startHour = 9; // Start at 9 AM
+      const endHour = 17; // End at 5 PM
+      const slotDuration = 30; // 30 minutes per slot
+
+      const currentSlot = new Date(startOfDay);
+      currentSlot.setHours(startHour, 0, 0, 0);
+
+      while (currentSlot.getHours() < endHour) {
+        const slotEnd = new Date(currentSlot.getTime() + slotDuration * 60000);
+        
+        // Check if this slot overlaps with any busy slots
+        const isAvailable = !busySlots.some(event => {
+          const eventStart = new Date(event.start.dateTime || event.start.date);
+          const eventEnd = new Date(event.end.dateTime || event.end.date);
+          return (
+            (currentSlot >= eventStart && currentSlot < eventEnd) ||
+            (slotEnd > eventStart && slotEnd <= eventEnd) ||
+            (currentSlot <= eventStart && slotEnd >= eventEnd)
+          );
+        });
+
+        // Don't include slots in the past
+        const isPast = currentSlot < new Date();
+
+        if (isAvailable && !isPast) {
+          availableSlots.push(currentSlot.toISOString());
+        }
+
+        // Move to next slot
+        currentSlot.setMinutes(currentSlot.getMinutes() + slotDuration);
+      }
+
+      return availableSlots;
     } catch (error) {
       console.error('Error checking availability:', error);
       throw error;
     }
   }
-
-  // Create calendar event
+  // Create calendar event with Google Meet
   async createEvent(businessId, eventDetails) {
     try {
       const calendar = await this.getCalendarClient(businessId);
       const response = await calendar.events.insert({
         calendarId: 'primary',
-        resource: eventDetails
+        conferenceDataVersion: 1, // Enable Google Meet
+        sendUpdates: 'all', // Send emails to attendees
+        resource: {
+          ...eventDetails,
+          reminders: {
+            useDefault: false,
+            overrides: [
+              { method: 'email', minutes: 60 }, // 1 hour before
+              { method: 'popup', minutes: 10 } // 10 minutes before
+            ]
+          }
+        }
       });
       return response.data;
     } catch (error) {
+      if (error.code === 401) {
+        // Token expired, try to refresh
+        await this.refreshToken(businessId);
+        // Retry the request
+        const calendar = await this.getCalendarClient(businessId);
+        const response = await calendar.events.insert({
+          calendarId: 'primary',
+          conferenceDataVersion: 1,
+          sendUpdates: 'all',
+          resource: {
+            ...eventDetails,
+            reminders: {
+              useDefault: false,
+              overrides: [
+                { method: 'email', minutes: 60 },
+                { method: 'popup', minutes: 10 }
+              ]
+            }
+          }
+        });
+        return response.data;
+      }
       console.error('Error creating event:', error);
       throw error;
     }
