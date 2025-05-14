@@ -1,6 +1,8 @@
 const { google } = require('googleapis');
 const config = require('./config');
 const supabase = require('../supabaseClient');
+const { DateTime } = require('luxon');
+
 
 class GoogleCalendarService {
   constructor() {
@@ -57,65 +59,68 @@ class GoogleCalendarService {
     return google.calendar({ version: 'v3', auth: this.oauth2Client });
   }
   // Check calendar availability and return available time slots
-  async checkAvailability(businessId, date) {
-    try {
-      const calendar = await this.getCalendarClient(businessId);
-      const startOfDay = new Date(date);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(date);
-      endOfDay.setHours(23, 59, 59, 999);
+async checkAvailability(businessId, date) {
+  try {
+    const calendar = await this.getCalendarClient(businessId);
 
-      // Get busy slots from Google Calendar
-      const response = await calendar.events.list({
-        calendarId: 'primary',
-        timeMin: startOfDay.toISOString(),
-        timeMax: endOfDay.toISOString(),
-        singleEvents: true,
-        orderBy: 'startTime'
+    // Fetch calendar timezone
+    const calendarList = await calendar.calendars.get({ calendarId: 'primary' });
+    const timeZone = calendarList.data.timeZone || 'UTC';
+
+    // Start and end of day in the business's timezone
+    const startOfDay = DateTime.fromISO(date, { zone: timeZone }).startOf('day');
+    const endOfDay = startOfDay.endOf('day');
+
+    // Get busy slots
+    const response = await calendar.events.list({
+      calendarId: 'primary',
+      timeMin: startOfDay.toISO(),
+      timeMax: endOfDay.toISO(),
+      singleEvents: true,
+      orderBy: 'startTime'
+    });
+
+    const busySlots = response.data.items;
+    const availableSlots = [];
+
+    const slotDuration = 30; // in minutes
+  const startHour = 9;  // 9 AM
+  const endHour = 20;   // 8 PM (in 24-hour format)
+
+
+    let currentSlot = startOfDay.set({ hour: startHour, minute: 0 });
+
+    while (currentSlot.hour < endHour) {
+      const slotEnd = currentSlot.plus({ minutes: slotDuration });
+
+      // Check if this slot overlaps with any busy events
+      const isAvailable = !busySlots.some(event => {
+        const eventStart = DateTime.fromISO(event.start.dateTime || event.start.date, { zone: timeZone });
+        const eventEnd = DateTime.fromISO(event.end.dateTime || event.end.date, { zone: timeZone });
+        return (
+          (currentSlot >= eventStart && currentSlot < eventEnd) ||
+          (slotEnd > eventStart && slotEnd <= eventEnd) ||
+          (currentSlot <= eventStart && slotEnd >= eventEnd)
+        );
       });
 
-      const busySlots = response.data.items;
-      const availableSlots = [];
+      // Don’t include slots in the past
+      const isPast = currentSlot < DateTime.local().setZone(timeZone);
 
-      // Generate all possible 30-minute slots for the day
-      const startHour = 9; // Start at 9 AM
-      const endHour = 17; // End at 5 PM
-      const slotDuration = 30; // 30 minutes per slot
-
-      const currentSlot = new Date(startOfDay);
-      currentSlot.setHours(startHour, 0, 0, 0);
-
-      while (currentSlot.getHours() < endHour) {
-        const slotEnd = new Date(currentSlot.getTime() + slotDuration * 60000);
-        
-        // Check if this slot overlaps with any busy slots
-        const isAvailable = !busySlots.some(event => {
-          const eventStart = new Date(event.start.dateTime || event.start.date);
-          const eventEnd = new Date(event.end.dateTime || event.end.date);
-          return (
-            (currentSlot >= eventStart && currentSlot < eventEnd) ||
-            (slotEnd > eventStart && slotEnd <= eventEnd) ||
-            (currentSlot <= eventStart && slotEnd >= eventEnd)
-          );
-        });
-
-        // Don't include slots in the past
-        const isPast = currentSlot < new Date();
-
-        if (isAvailable && !isPast) {
-          availableSlots.push(currentSlot.toISOString());
-        }
-
-        // Move to next slot
-        currentSlot.setMinutes(currentSlot.getMinutes() + slotDuration);
+      if (isAvailable && !isPast) {
+        availableSlots.push(currentSlot.toISO());
       }
 
-      return availableSlots;
-    } catch (error) {
-      console.error('Error checking availability:', error);
-      throw error;
+      currentSlot = currentSlot.plus({ minutes: slotDuration });
     }
+
+    return availableSlots;
+  } catch (error) {
+    console.error('Error checking availability:', error);
+    throw error;
   }
+}
+
   // Create calendar event with Google Meet
   async createEvent(businessId, eventDetails) {
     try {
