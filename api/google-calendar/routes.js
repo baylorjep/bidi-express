@@ -10,7 +10,7 @@ router.get('/auth', (req, res) => {
   }
   
   const authUrl = calendarService.getAuthUrl(businessId);
-  res.json({ authUrl });
+  res.redirect(authUrl); // Redirect the user to the Google OAuth URL
 });
 
 // OAuth callback
@@ -100,4 +100,4 @@ router.delete('/events/:eventId', async (req, res) => {
   }
 });
 
-module.exports = router; 
+module.exports = router;
