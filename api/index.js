@@ -1,22 +1,8 @@
-// Fix for debug module in serverless environment
-const path = require('path');
-const fs = require('fs');
-
-// Create the common.js file if it doesn't exist
-const debugPath = path.join(__dirname, '../node_modules/debug/src');
-const commonPath = path.join(debugPath, 'common.js');
-
-if (!fs.existsSync(commonPath)) {
-    const commonContent = `
-    module.exports = {
-        humanize: require('ms'),
-        supportsColor: () => false
-    };
-    `;
-    fs.writeFileSync(commonPath, commonContent);
-}
+// Disable debug logging in production to avoid missing common.js error
+process.env.DEBUG = '';
 
 require('dotenv').config(); // Load environment variables
+
 const express = require("express");
 const app = express();
 
