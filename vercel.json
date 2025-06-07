@@ -1,19 +1,28 @@
 {
-  "version": 2,
+  "version": 3,
   "builds": [
     {
       "src": "api/index.js",
       "use": "@vercel/node",
       "config": {
-        "nodeVersion": "18.x",
-        "includeFiles": "node_modules/debug/src/common.js"
+        "includeFiles": [
+          "api/**/*",
+          "node_modules/**/*"
+        ]
       }
     }
   ],
   "routes": [
     {
-      "src": "/(.*)",
+      "src": "/api/(.*)",
       "dest": "api/index.js"
     }
-  ]
+  ],
+  "functions": {
+    "api/index.js": {
+      "memory": 1024,
+      "maxDuration": 10
+    }
+  }
+  // Branch deployment test
 }
