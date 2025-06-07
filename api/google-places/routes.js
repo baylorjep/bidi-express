@@ -5,7 +5,7 @@ const NodeCache = require('node-cache');
 const rateLimit = require('express-rate-limit');
 const axios = require('axios');
 const google = require('googleapis');
-const { supabase } = require('../lib/supabase');
+const supabase = require('../supabaseClient');
 
 // Initialize Google Maps client
 const client = new Client({});
