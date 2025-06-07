@@ -23,6 +23,6 @@
       "memory": 1024,
       "maxDuration": 10
     }
-  }
-  // Branch deployment test
+  },
+  "buildCommand": "npm run build"
 }
