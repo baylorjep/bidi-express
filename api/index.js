@@ -24,6 +24,9 @@ const { generateAutoBidForBusiness } = require('./Autobid');
 // Google Calendar routes
 const googleCalendarRoutes = require('./google-calendar/routes');
 
+// Google Places routes
+const googlePlacesRoutes = require('./google-places/routes');
+
 // Initialize Resend with the API key
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -39,15 +42,20 @@ const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY,
 
 // Enable CORS with the frontend's URL to allow api requests from the site
 app.use(cors({
-  origin: ['https://www.savewithbidi.com', 'http://localhost:3000'], // Replace with your actual frontend URL
-  methods: ['GET', 'POST', 'PUT', 'DELETE'], // Updated to include all methods
-  credentials: true, // If needed (e.g., for cookies)
+  origin: ['https://www.savewithbidi.com', 'http://localhost:3000'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range']
 }));
 
 app.use(express.json());
 
 // Mount Google Calendar routes
 app.use('/api/calendar', googleCalendarRoutes);
+
+// Mount Google Places routes
+app.use('/api/google-places', googlePlacesRoutes);
 
 // Business Profile routes
 app.get('/api/business-profiles/:id', async (req, res) => {
@@ -714,5 +722,14 @@ if (process.env.NODE_ENV !== "production") {
     console.log("Node server listening on port 4242 with Socket.IO enabled! Visit http://localhost:5000");
   });
 }
+
+// Add error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Global error handler:', err);
+  res.status(err.status || 500).json({
+    error: err.message || 'Internal Server Error',
+    details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+  });
+});
 
 module.exports = app; // Export for Vercel
