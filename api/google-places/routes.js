@@ -46,6 +46,17 @@ const extractPlaceIdFromUrl = async (url) => {
     let businessName = '';
     let location = '';
 
+    // Helper function to clean location string
+    const cleanLocation = (loc) => {
+      if (!loc) return undefined;
+      // Remove zoom level and any other non-coordinate parts
+      const match = loc.match(/([-\d.]+),([-\d.]+)/);
+      if (match) {
+        return `${match[1]},${match[2]}`;
+      }
+      return undefined;
+    };
+
     // Handle maps.app.goo.gl URLs
     if (url.includes('maps.app.goo.gl')) {
       console.log('Detected maps.app.goo.gl URL, following redirect...');
@@ -76,11 +87,11 @@ const extractPlaceIdFromUrl = async (url) => {
 
           const locationMatch = finalUrl.match(/@([^\/]+)/);
           if (locationMatch && locationMatch[1]) {
-            location = locationMatch[1];
+            location = cleanLocation(locationMatch[1]);
           }
 
           if (businessName) {
-            console.log('Using Find Place API to get correct Place ID for:', businessName);
+            console.log('Using Find Place API to get correct Place ID for:', businessName, 'in location:', location);
             const response = await client.findPlaceFromText({
               params: {
                 input: businessName,
@@ -91,10 +102,33 @@ const extractPlaceIdFromUrl = async (url) => {
               }
             });
 
+            console.log('Find Place response:', JSON.stringify(response.data, null, 2));
+
             if (response.data.candidates && response.data.candidates.length > 0) {
               const placeId = response.data.candidates[0].place_id;
               console.log('Found correct Place ID:', placeId);
               return placeId;
+            }
+
+            // If no results found, try without location bias
+            if (location) {
+              console.log('No results found with location bias, trying without location...');
+              const responseWithoutLocation = await client.findPlaceFromText({
+                params: {
+                  input: businessName,
+                  inputtype: 'textquery',
+                  fields: ['place_id', 'name', 'formatted_address'],
+                  key: process.env.GOOGLE_PLACES_API_KEY
+                }
+              });
+
+              console.log('Find Place response without location:', JSON.stringify(responseWithoutLocation.data, null, 2));
+
+              if (responseWithoutLocation.data.candidates && responseWithoutLocation.data.candidates.length > 0) {
+                const placeId = responseWithoutLocation.data.candidates[0].place_id;
+                console.log('Found correct Place ID without location:', placeId);
+                return placeId;
+              }
             }
           }
         } else {
@@ -110,7 +144,7 @@ const extractPlaceIdFromUrl = async (url) => {
 
       const locationMatch = finalUrl.match(/@([^\/]+)/);
       if (locationMatch && locationMatch[1]) {
-        location = locationMatch[1];
+        location = cleanLocation(locationMatch[1]);
       }
     }
     
@@ -143,11 +177,11 @@ const extractPlaceIdFromUrl = async (url) => {
 
           const locationMatch = finalUrl.match(/@([^\/]+)/);
           if (locationMatch && locationMatch[1]) {
-            location = locationMatch[1];
+            location = cleanLocation(locationMatch[1]);
           }
 
           if (businessName) {
-            console.log('Using Find Place API to get correct Place ID for:', businessName);
+            console.log('Using Find Place API to get correct Place ID for:', businessName, 'in location:', location);
             const response = await client.findPlaceFromText({
               params: {
                 input: businessName,
@@ -158,10 +192,33 @@ const extractPlaceIdFromUrl = async (url) => {
               }
             });
 
+            console.log('Find Place response:', JSON.stringify(response.data, null, 2));
+
             if (response.data.candidates && response.data.candidates.length > 0) {
               const placeId = response.data.candidates[0].place_id;
               console.log('Found correct Place ID:', placeId);
               return placeId;
+            }
+
+            // If no results found, try without location bias
+            if (location) {
+              console.log('No results found with location bias, trying without location...');
+              const responseWithoutLocation = await client.findPlaceFromText({
+                params: {
+                  input: businessName,
+                  inputtype: 'textquery',
+                  fields: ['place_id', 'name', 'formatted_address'],
+                  key: process.env.GOOGLE_PLACES_API_KEY
+                }
+              });
+
+              console.log('Find Place response without location:', JSON.stringify(responseWithoutLocation.data, null, 2));
+
+              if (responseWithoutLocation.data.candidates && responseWithoutLocation.data.candidates.length > 0) {
+                const placeId = responseWithoutLocation.data.candidates[0].place_id;
+                console.log('Found correct Place ID without location:', placeId);
+                return placeId;
+              }
             }
           }
         } else {
@@ -176,7 +233,7 @@ const extractPlaceIdFromUrl = async (url) => {
 
       const locationMatch = finalUrl.match(/@([^\/]+)/);
       if (locationMatch && locationMatch[1]) {
-        location = locationMatch[1];
+        location = cleanLocation(locationMatch[1]);
       }
     }
     
@@ -211,11 +268,11 @@ const extractPlaceIdFromUrl = async (url) => {
 
           const locationMatch = url.match(/@([^\/]+)/);
           if (locationMatch && locationMatch[1]) {
-            location = locationMatch[1];
+            location = cleanLocation(locationMatch[1]);
           }
 
           if (businessName) {
-            console.log('Using Find Place API to get correct Place ID for:', businessName);
+            console.log('Using Find Place API to get correct Place ID for:', businessName, 'in location:', location);
             const response = await client.findPlaceFromText({
               params: {
                 input: businessName,
@@ -226,10 +283,33 @@ const extractPlaceIdFromUrl = async (url) => {
               }
             });
 
+            console.log('Find Place response:', JSON.stringify(response.data, null, 2));
+
             if (response.data.candidates && response.data.candidates.length > 0) {
               const placeId = response.data.candidates[0].place_id;
               console.log('Found correct Place ID:', placeId);
               return placeId;
+            }
+
+            // If no results found, try without location bias
+            if (location) {
+              console.log('No results found with location bias, trying without location...');
+              const responseWithoutLocation = await client.findPlaceFromText({
+                params: {
+                  input: businessName,
+                  inputtype: 'textquery',
+                  fields: ['place_id', 'name', 'formatted_address'],
+                  key: process.env.GOOGLE_PLACES_API_KEY
+                }
+              });
+
+              console.log('Find Place response without location:', JSON.stringify(responseWithoutLocation.data, null, 2));
+
+              if (responseWithoutLocation.data.candidates && responseWithoutLocation.data.candidates.length > 0) {
+                const placeId = responseWithoutLocation.data.candidates[0].place_id;
+                console.log('Found correct Place ID without location:', placeId);
+                return placeId;
+              }
             }
           }
         } else {
@@ -244,7 +324,7 @@ const extractPlaceIdFromUrl = async (url) => {
 
       const locationMatch = url.match(/@([^\/]+)/);
       if (locationMatch && locationMatch[1]) {
-        location = locationMatch[1];
+        location = cleanLocation(locationMatch[1]);
       }
     }
 
@@ -274,6 +354,27 @@ const extractPlaceIdFromUrl = async (url) => {
         const placeId = response.data.candidates[0].place_id;
         console.log('Found Place ID:', placeId);
         return placeId;
+      }
+
+      // If no results found, try without location bias
+      if (location) {
+        console.log('No results found with location bias, trying without location...');
+        const responseWithoutLocation = await client.findPlaceFromText({
+          params: {
+            input: businessName,
+            inputtype: 'textquery',
+            fields: ['place_id', 'name', 'formatted_address'],
+            key: process.env.GOOGLE_PLACES_API_KEY
+          }
+        });
+
+        console.log('Find Place response without location:', JSON.stringify(responseWithoutLocation.data, null, 2));
+
+        if (responseWithoutLocation.data.candidates && responseWithoutLocation.data.candidates.length > 0) {
+          const placeId = responseWithoutLocation.data.candidates[0].place_id;
+          console.log('Found Place ID without location:', placeId);
+          return placeId;
+        }
       }
     }
 
