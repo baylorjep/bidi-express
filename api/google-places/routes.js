@@ -63,9 +63,43 @@ const extractPlaceIdFromUrl = async (url) => {
       // Try to extract Place ID from !1s parameter first
       const placeIdMatch = finalUrl.match(/!1s([^!]+)/);
       if (placeIdMatch && placeIdMatch[1]) {
-        const placeId = placeIdMatch[1];
-        console.log('Extracted Place ID from !1s parameter:', placeId);
-        return placeId;
+        const rawPlaceId = placeIdMatch[1];
+        console.log('Extracted raw Place ID from !1s parameter:', rawPlaceId);
+        
+        // If the Place ID doesn't start with ChIJ, use Find Place API
+        if (!rawPlaceId.startsWith('ChIJ')) {
+          // Extract business name and location for Find Place API
+          const nameMatch = finalUrl.match(/place\/([^\/]+)/);
+          if (nameMatch && nameMatch[1]) {
+            businessName = decodeURIComponent(nameMatch[1].replace(/\+/g, ' '));
+          }
+
+          const locationMatch = finalUrl.match(/@([^\/]+)/);
+          if (locationMatch && locationMatch[1]) {
+            location = locationMatch[1];
+          }
+
+          if (businessName) {
+            console.log('Using Find Place API to get correct Place ID for:', businessName);
+            const response = await client.findPlaceFromText({
+              params: {
+                input: businessName,
+                inputtype: 'textquery',
+                locationbias: location ? `point:${location}` : undefined,
+                fields: ['place_id', 'name', 'formatted_address'],
+                key: process.env.GOOGLE_PLACES_API_KEY
+              }
+            });
+
+            if (response.data.candidates && response.data.candidates.length > 0) {
+              const placeId = response.data.candidates[0].place_id;
+              console.log('Found correct Place ID:', placeId);
+              return placeId;
+            }
+          }
+        } else {
+          return rawPlaceId;
+        }
       }
 
       // If no Place ID found in !1s, try to extract business name and location
@@ -96,9 +130,43 @@ const extractPlaceIdFromUrl = async (url) => {
       // Try to extract Place ID from !1s parameter first
       const placeIdMatch = finalUrl.match(/!1s([^!]+)/);
       if (placeIdMatch && placeIdMatch[1]) {
-        const placeId = placeIdMatch[1];
-        console.log('Extracted Place ID from !1s parameter:', placeId);
-        return placeId;
+        const rawPlaceId = placeIdMatch[1];
+        console.log('Extracted raw Place ID from !1s parameter:', rawPlaceId);
+        
+        // If the Place ID doesn't start with ChIJ, use Find Place API
+        if (!rawPlaceId.startsWith('ChIJ')) {
+          // Extract business name and location for Find Place API
+          const nameMatch = finalUrl.match(/place\/([^\/]+)/);
+          if (nameMatch && nameMatch[1]) {
+            businessName = decodeURIComponent(nameMatch[1].replace(/\+/g, ' '));
+          }
+
+          const locationMatch = finalUrl.match(/@([^\/]+)/);
+          if (locationMatch && locationMatch[1]) {
+            location = locationMatch[1];
+          }
+
+          if (businessName) {
+            console.log('Using Find Place API to get correct Place ID for:', businessName);
+            const response = await client.findPlaceFromText({
+              params: {
+                input: businessName,
+                inputtype: 'textquery',
+                locationbias: location ? `point:${location}` : undefined,
+                fields: ['place_id', 'name', 'formatted_address'],
+                key: process.env.GOOGLE_PLACES_API_KEY
+              }
+            });
+
+            if (response.data.candidates && response.data.candidates.length > 0) {
+              const placeId = response.data.candidates[0].place_id;
+              console.log('Found correct Place ID:', placeId);
+              return placeId;
+            }
+          }
+        } else {
+          return rawPlaceId;
+        }
       }
 
       const nameMatch = finalUrl.match(/place\/([^\/]+)/);
@@ -130,9 +198,43 @@ const extractPlaceIdFromUrl = async (url) => {
       // Try to extract Place ID from !1s parameter first
       const placeIdMatch = url.match(/!1s([^!]+)/);
       if (placeIdMatch && placeIdMatch[1]) {
-        const placeId = placeIdMatch[1];
-        console.log('Extracted Place ID from !1s parameter:', placeId);
-        return placeId;
+        const rawPlaceId = placeIdMatch[1];
+        console.log('Extracted raw Place ID from !1s parameter:', rawPlaceId);
+        
+        // If the Place ID doesn't start with ChIJ, use Find Place API
+        if (!rawPlaceId.startsWith('ChIJ')) {
+          // Extract business name and location for Find Place API
+          const nameMatch = url.match(/place\/([^\/]+)/);
+          if (nameMatch && nameMatch[1]) {
+            businessName = decodeURIComponent(nameMatch[1].replace(/\+/g, ' '));
+          }
+
+          const locationMatch = url.match(/@([^\/]+)/);
+          if (locationMatch && locationMatch[1]) {
+            location = locationMatch[1];
+          }
+
+          if (businessName) {
+            console.log('Using Find Place API to get correct Place ID for:', businessName);
+            const response = await client.findPlaceFromText({
+              params: {
+                input: businessName,
+                inputtype: 'textquery',
+                locationbias: location ? `point:${location}` : undefined,
+                fields: ['place_id', 'name', 'formatted_address'],
+                key: process.env.GOOGLE_PLACES_API_KEY
+              }
+            });
+
+            if (response.data.candidates && response.data.candidates.length > 0) {
+              const placeId = response.data.candidates[0].place_id;
+              console.log('Found correct Place ID:', placeId);
+              return placeId;
+            }
+          }
+        } else {
+          return rawPlaceId;
+        }
       }
 
       const nameMatch = url.match(/place\/([^\/]+)/);
