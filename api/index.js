@@ -40,6 +40,9 @@ const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY,
   }
 );
 
+// Trust proxy - needed for proper rate limiting behind Vercel
+app.set('trust proxy', 1);
+
 // Enable CORS with the frontend's URL to allow api requests from the site
 app.use(cors({
   origin: ['https://www.savewithbidi.com', 'http://localhost:3000'],
