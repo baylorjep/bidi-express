@@ -60,7 +60,15 @@ const extractPlaceIdFromUrl = async (url) => {
       const finalUrl = response.request.res.responseUrl;
       console.log('Final URL after redirect:', finalUrl);
       
-      // Extract business name and location from the URL
+      // Try to extract Place ID from !1s parameter first
+      const placeIdMatch = finalUrl.match(/!1s([^!]+)/);
+      if (placeIdMatch && placeIdMatch[1]) {
+        const placeId = placeIdMatch[1];
+        console.log('Extracted Place ID from !1s parameter:', placeId);
+        return placeId;
+      }
+
+      // If no Place ID found in !1s, try to extract business name and location
       const nameMatch = finalUrl.match(/place\/([^\/]+)/);
       if (nameMatch && nameMatch[1]) {
         businessName = decodeURIComponent(nameMatch[1].replace(/\+/g, ' '));
@@ -85,6 +93,14 @@ const extractPlaceIdFromUrl = async (url) => {
       const finalUrl = response.request.res.responseUrl;
       console.log('Final URL after redirect:', finalUrl);
       
+      // Try to extract Place ID from !1s parameter first
+      const placeIdMatch = finalUrl.match(/!1s([^!]+)/);
+      if (placeIdMatch && placeIdMatch[1]) {
+        const placeId = placeIdMatch[1];
+        console.log('Extracted Place ID from !1s parameter:', placeId);
+        return placeId;
+      }
+
       const nameMatch = finalUrl.match(/place\/([^\/]+)/);
       if (nameMatch && nameMatch[1]) {
         businessName = decodeURIComponent(nameMatch[1].replace(/\+/g, ' '));
@@ -110,6 +126,15 @@ const extractPlaceIdFromUrl = async (url) => {
     // Handle google.com/maps/place/ URLs
     if (url.includes('google.com/maps/place/')) {
       console.log('Detected google.com/maps/place URL...');
+      
+      // Try to extract Place ID from !1s parameter first
+      const placeIdMatch = url.match(/!1s([^!]+)/);
+      if (placeIdMatch && placeIdMatch[1]) {
+        const placeId = placeIdMatch[1];
+        console.log('Extracted Place ID from !1s parameter:', placeId);
+        return placeId;
+      }
+
       const nameMatch = url.match(/place\/([^\/]+)/);
       if (nameMatch && nameMatch[1]) {
         businessName = decodeURIComponent(nameMatch[1].replace(/\+/g, ' '));
