@@ -46,10 +46,11 @@ app.set('trust proxy', 1);
 // Enable CORS with the frontend's URL to allow api requests from the site
 app.use(cors({
   origin: ['https://www.savewithbidi.com', 'http://localhost:3000'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true,
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
-  exposedHeaders: ['Content-Range', 'X-Content-Range']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range', 'Authorization'],
+  maxAge: 86400 // 24 hours
 }));
 
 app.use(express.json());

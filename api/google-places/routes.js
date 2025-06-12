@@ -4,7 +4,7 @@ const { Client } = require('@googlemaps/google-maps-services-js');
 const NodeCache = require('node-cache');
 const rateLimit = require('express-rate-limit');
 const axios = require('axios');
-const google = require('googleapis');
+const { google } = require('googleapis');
 const supabase = require('../supabaseClient');
 
 // Initialize Google Maps client
@@ -22,6 +22,33 @@ const limiter = rateLimit({
 
 // Apply rate limiting to all routes
 router.use(limiter);
+
+// Add helper functions at the top of the file
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+const makeApiRequest = async (url, accessToken, maxRetries = 3, baseDelay = 2000) => {
+  let retries = 0;
+  
+  while (retries <= maxRetries) {
+    try {
+      const response = await axios.get(url, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+      return response;
+    } catch (error) {
+      if (error.response?.status === 429 && retries < maxRetries) {
+        const delayTime = baseDelay * Math.pow(2, retries);
+        console.log(`Rate limit hit, retrying in ${delayTime}ms (attempt ${retries + 1}/${maxRetries})`);
+        await delay(delayTime);
+        retries++;
+        continue;
+      }
+      throw error;
+    }
+  }
+};
 
 // Helper function to validate Place ID format
 const isValidPlaceId = (placeId) => {
@@ -686,69 +713,84 @@ router.get('/url-to-place-id', async (req, res) => {
   }
 });
 
-// Business Profile API routes
+// Google Business Profile Authentication endpoint
 router.get('/business-profile/auth', async (req, res) => {
-  console.log('Auth request received with query params:', req.query);
-  
-  const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_BUSINESS_CLIENT_ID,  // Changed from GOOGLE_CLIENT_ID
-    process.env.GOOGLE_BUSINESS_CLIENT_SECRET,  // Changed from GOOGLE_CLIENT_SECRET
-    process.env.NODE_ENV === 'production' 
-      ? 'https://savewithbidi.com/api/google-places/business-profile/callback'
-      : 'http://localhost:5000/api/google-places/business-profile/callback'
-  );
-
-  // Required scopes for Business Profile API
-  const scopes = [
-    'https://www.googleapis.com/auth/business.manage'  // We need this scope to read and manage reviews
-  ];
-
-  const authUrl = oauth2Client.generateAuthUrl({
-    access_type: 'offline',  // This ensures we get a refresh token
-    scope: scopes,
-    prompt: 'consent',       // Always show consent screen to ensure we get refresh token
-    include_granted_scopes: true,
-    state: req.query.businessProfileId // Pass the business profile ID in the state parameter
-  });
-
-  console.log('Generated auth URL:', authUrl);
-
-  res.json({ 
-    authUrl,
-    scopes: scopes,
-    message: 'Use this URL to authenticate with Google Business Profile. The vendor will need to grant access to manage their business information and reviews.'
-  });
-});
-
-router.get('/business-profile/callback', async (req, res) => {
-  console.log('Callback received with query params:', req.query);
-  console.log('Full request URL:', req.originalUrl);
-  
-  const { code, state: businessProfileId } = req.query;
-  
-  if (!code || !businessProfileId) {
-    console.log('Missing parameters:', { code: !!code, businessProfileId: !!businessProfileId });
-    return res.status(400).json({ 
-      error: 'Missing required parameters',
-      details: 'Authorization code and business profile ID are required'
-    });
-  }
-
   try {
+    const { businessProfileId } = req.query;
+    
+    if (!businessProfileId) {
+      return res.status(400).json({ error: 'Business profile ID is required' });
+    }
+
+    const redirectUri = process.env.NODE_ENV === 'production'
+      ? 'https://www.savewithbidi.com/api/google-places/business-profile/callback'
+      : 'http://localhost:5000/api/google-places/business-profile/callback';
+
     const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_BUSINESS_CLIENT_ID,  // Changed from GOOGLE_CLIENT_ID
-      process.env.GOOGLE_BUSINESS_CLIENT_SECRET,  // Changed from GOOGLE_CLIENT_SECRET
-      process.env.NODE_ENV === 'production' 
-        ? 'https://savewithbidi.com/api/google-places/business-profile/callback'
-        : 'http://localhost:5000/api/google-places/business-profile/callback'
+      process.env.GOOGLE_BUSINESS_CLIENT_ID,
+      process.env.GOOGLE_BUSINESS_SECRET,
+      redirectUri
     );
 
-    // Exchange the authorization code for tokens
+    const scopes = [
+      'https://www.googleapis.com/auth/business.manage'
+    ];
+
+    const authUrl = oauth2Client.generateAuthUrl({
+      access_type: 'offline',
+      scope: scopes,
+      prompt: 'consent',
+      include_granted_scopes: true,
+      state: businessProfileId
+    });
+
+    res.json({ authUrl });
+  } catch (error) {
+    console.error('Error generating auth URL:', error);
+    res.status(500).json({ error: 'Failed to generate authentication URL' });
+  }
+});
+
+// Google Business Profile OAuth callback endpoint
+router.get('/business-profile/callback', async (req, res) => {
+  try {
+    console.log('Callback received with query params:', req.query);
+    console.log('Full request URL:', req.originalUrl);
+    
+    const { code, state: businessProfileId } = req.query;
+    
+    if (!code) {
+      console.log('Missing authorization code');
+      return res.status(400).json({ error: 'Authorization code is required' });
+    }
+
+    if (!businessProfileId) {
+      console.log('Missing business profile ID');
+      return res.status(400).json({ error: 'Business profile ID is required' });
+    }
+
+    const redirectUri = process.env.NODE_ENV === 'production'
+      ? 'https://www.savewithbidi.com/api/google-places/business-profile/callback'
+      : 'http://localhost:5000/api/google-places/business-profile/callback';
+
+    console.log('Using redirect URI:', redirectUri);
+    console.log('Using client ID:', process.env.GOOGLE_BUSINESS_CLIENT_ID);
+
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_BUSINESS_CLIENT_ID,
+      process.env.GOOGLE_BUSINESS_SECRET,
+      redirectUri
+    );
+
+    console.log('Attempting to get token with code:', code);
     const { tokens } = await oauth2Client.getToken(code);
+    console.log('Successfully received tokens:', tokens);
+    
     oauth2Client.setCredentials(tokens);
 
-    // Store the tokens in Supabase
-    const { error: tokenError } = await supabase
+    // Store the tokens in the oauth_tokens table
+    console.log('Storing tokens in database...');
+    const { data, error } = await supabase
       .from('oauth_tokens')
       .upsert({
         business_profile_id: businessProfileId,
@@ -756,35 +798,238 @@ router.get('/business-profile/callback', async (req, res) => {
         refresh_token: tokens.refresh_token,
         token_type: tokens.token_type,
         expiry_date: new Date(tokens.expiry_date).toISOString(),
-        service: 'google_business'  // Added to distinguish from calendar tokens
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
       });
 
-    if (tokenError) {
-      console.error('Error storing tokens:', tokenError);
-      throw new Error('Failed to store OAuth tokens');
+    if (error) {
+      console.error('Error storing tokens in database:', error);
+      throw error;
     }
 
-    // Update the business profile to indicate we're using Places API
-    const { error: profileError } = await supabase
-      .from('business_profiles')
-      .update({
-        google_reviews_status: 'connected_places_api',
-        google_business_account_id: null,
-        google_business_location_id: null
-      })
-      .eq('id', businessProfileId);
+    console.log('Successfully stored tokens in database');
 
-    if (profileError) {
-      console.error('Error updating business profile:', profileError);
-      throw new Error('Failed to update business profile');
+    // Define frontend URL at the start
+    const frontendUrl = process.env.NODE_ENV === 'production'
+      ? 'https://www.savewithbidi.com'
+      : 'http://localhost:3000';
+
+    try {
+      console.log('Starting Google Business Profile API calls...');
+      console.log('Access Token:', tokens.access_token);
+      console.log('Token Type:', tokens.token_type);
+      console.log('Token Expiry:', new Date(tokens.expiry_date).toISOString());
+
+      // Get account information from Google Business Profile API
+      console.log('Fetching account information...');
+      
+      // Use the My Business API v4 with retry logic
+      const accountResponse = await makeApiRequest(
+        'https://mybusinessaccountmanagement.googleapis.com/v1/accounts',
+        tokens.access_token
+      );
+      
+      console.log('Account API Response Status:', accountResponse.status);
+      console.log('Account API Response Headers:', accountResponse.headers);
+      console.log('Account API Response Data:', JSON.stringify(accountResponse.data, null, 2));
+
+      if (accountResponse.data.accounts && accountResponse.data.accounts.length > 0) {
+        const account = accountResponse.data.accounts[0];
+        console.log('Found account:', JSON.stringify(account, null, 2));
+        
+        // Add delay between API calls
+        await delay(2000);
+        
+        // Get location information using the My Business API with retry logic
+        console.log('Fetching location information for account:', account.name);
+        const locationsResponse = await makeApiRequest(
+          `https://mybusinessbusinessinformation.googleapis.com/v1/accounts/${account.name}/locations`,
+          tokens.access_token
+        );
+        
+        console.log('Locations API Response Status:', locationsResponse.status);
+        console.log('Locations API Response Headers:', locationsResponse.headers);
+        console.log('Locations API Response Data:', JSON.stringify(locationsResponse.data, null, 2));
+
+        if (locationsResponse.data.locations && locationsResponse.data.locations.length > 0) {
+          const locationInfo = locationsResponse.data.locations[0];
+          console.log('Found location:', JSON.stringify(locationInfo, null, 2));
+          
+          // Update the business profile with Google Business Profile information
+          console.log('Updating business profile in database...');
+          const updateData = {
+            google_business_account_id: account.name,
+            google_business_connected: true,
+            google_business_location_id: locationInfo.name,
+            google_business_name: locationInfo.locationName,
+            google_business_address: locationInfo.address,
+            google_maps_url: locationInfo.websiteUri,
+            google_rating: locationInfo.rating,
+            google_total_ratings: locationInfo.totalRatingCount
+          };
+          console.log('Update data:', JSON.stringify(updateData, null, 2));
+
+          const { error: profileError } = await supabase
+            .from('business_profiles')
+            .update(updateData)
+            .eq('id', businessProfileId);
+
+          if (profileError) {
+            console.error('Error updating business profile:', profileError);
+            throw profileError;
+          }
+
+          console.log('Successfully updated business profile');
+          return res.redirect(`${frontendUrl}/business-profile/success`);
+        } else {
+          console.log('No locations found for this account');
+          throw new Error('No Google Business Profile locations found');
+        }
+      } else {
+        console.log('No Google Business Profile accounts found in response');
+        throw new Error('No Google Business Profile accounts found');
+      }
+    } catch (apiError) {
+      console.error('Error details:', {
+        message: apiError.message,
+        status: apiError.response?.status,
+        statusText: apiError.response?.statusText,
+        data: apiError.response?.data,
+        headers: apiError.response?.headers,
+        config: {
+          url: apiError.config?.url,
+          method: apiError.config?.method,
+          headers: apiError.config?.headers
+        }
+      });
+
+      // Handle specific API errors
+      if (apiError.response?.status === 429) {
+        const errorMessage = 'Google Business Profile API rate limit exceeded. Please try again in a few minutes.';
+        console.error('Rate limit exceeded:', errorMessage);
+        return res.redirect(`${frontendUrl}/business-profile/error?message=${encodeURIComponent(errorMessage)}`);
+      }
+
+      if (apiError.response?.status === 403) {
+        const errorData = apiError.response.data?.error;
+        if (errorData?.message?.includes('API has not been used') || errorData?.message?.includes('it is disabled')) {
+          const projectId = errorData.message.match(/project (\d+)/)?.[1];
+          const errorMessage = `Google Business Profile API needs to be enabled. Please contact your administrator to enable the API for project ${projectId}.`;
+          console.error('API not enabled:', errorMessage);
+          return res.redirect(`${frontendUrl}/business-profile/error?message=${encodeURIComponent(errorMessage)}`);
+        }
+      }
+
+      // For other errors, redirect to error page with a user-friendly message
+      const errorMessage = 'Unable to connect to Google Business Profile. Please try again later or contact support.';
+      console.error('Detailed error in callback:', apiError);
+      return res.redirect(`${frontendUrl}/business-profile/error?message=${encodeURIComponent(errorMessage)}`);
     }
-
-    // Redirect to the frontend with success
-    res.redirect(`http://localhost:3000/business-settings?google_connected=true&api_type=places`);
   } catch (error) {
-    console.error('Error in callback:', error);
-    // Redirect to frontend with error
-    res.redirect(`http://localhost:3000/business-settings?google_error=${encodeURIComponent(error.message)}`);
+    console.error('Detailed error in callback:', {
+      message: error.message,
+      stack: error.stack,
+      code: error.code,
+      errors: error.errors
+    });
+    
+    const frontendUrl = process.env.NODE_ENV === 'production'
+      ? 'https://www.savewithbidi.com'
+      : 'http://localhost:3000';
+    
+    const errorMessage = encodeURIComponent(error.message || 'An unknown error occurred');
+    console.log('Redirecting to error page with message:', errorMessage);
+    res.redirect(`${frontendUrl}/business-profile/error?message=${errorMessage}`);
+  }
+});
+
+// Add a new endpoint to fetch reviews
+router.post('/fetch-reviews', async (req, res) => {
+  try {
+    const { businessProfileId } = req.body;
+    
+    if (!businessProfileId) {
+      return res.status(400).json({ error: 'Business profile ID is required' });
+    }
+
+    // Get the business profile and OAuth tokens
+    const { data: businessProfile, error: profileError } = await supabase
+      .from('business_profiles')
+      .select('google_business_location_id')
+      .eq('id', businessProfileId)
+      .single();
+
+    if (profileError || !businessProfile?.google_business_location_id) {
+      return res.status(400).json({ error: 'Business profile not properly connected to Google Business Profile' });
+    }
+
+    const { data: oauthToken, error: tokenError } = await supabase
+      .from('oauth_tokens')
+      .select('access_token')
+      .eq('business_profile_id', businessProfileId)
+      .single();
+
+    if (tokenError || !oauthToken?.access_token) {
+      return res.status(400).json({ error: 'No valid OAuth token found' });
+    }
+
+    // Get reviews using the My Business API
+    console.log('Fetching reviews for location:', businessProfile.google_business_location_id);
+    const reviewsResponse = await axios.get(
+      `https://mybusinessplaceactions.googleapis.com/v1/${businessProfile.google_business_location_id}/reviews`,
+      {
+        headers: {
+          'Authorization': `Bearer ${oauthToken.access_token}`
+        }
+      }
+    );
+
+    // Store reviews in the existing reviews table
+    if (reviewsResponse.data.reviews) {
+      console.log('Storing reviews in database...');
+      const { error: reviewsError } = await supabase
+        .from('reviews')
+        .upsert(
+          reviewsResponse.data.reviews.map(review => ({
+            vendor_id: businessProfileId,
+            rating: review.rating,
+            review_rating: review.rating,
+            comment: review.comment,
+            first_name: review.reviewer.displayName.split(' ')[0] || '',
+            last_name: review.reviewer.displayName.split(' ').slice(1).join(' ') || '',
+            created_at: review.createTime,
+            updated_at: review.updateTime || review.createTime,
+            is_google_review: true,
+            google_review_id: review.reviewId,
+            is_approved: true,
+            review_language: review.language || 'en',
+            relative_time_description: review.relativeTimeDescription || ''
+          }))
+        );
+
+      if (reviewsError) {
+        console.error('Error storing reviews:', reviewsError);
+        return res.status(500).json({ error: 'Failed to store reviews' });
+      }
+
+      return res.json({ 
+        success: true, 
+        message: 'Reviews fetched and stored successfully',
+        count: reviewsResponse.data.reviews.length
+      });
+    } else {
+      return res.json({ 
+        success: true, 
+        message: 'No reviews found',
+        count: 0
+      });
+    }
+  } catch (error) {
+    console.error('Error fetching reviews:', error);
+    return res.status(500).json({ 
+      error: 'Failed to fetch reviews',
+      details: error.message
+    });
   }
 });
 
