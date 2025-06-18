@@ -2,61 +2,60 @@
 process.env.DEBUG = '';
 
 require('dotenv').config(); // Load environment variables
-
 const express = require("express");
-const app = express();
-
-// cors for cross origin resource sharing
 const cors = require("cors"); 
-
-// body parser for parsing request bodies
 const bodyParser = require('body-parser');
-
-// Resend declaration for emailing
 const { Resend } = require('resend');
-
-// supabase declaration for dbm
 const supabase = require('./supabaseClient');
-
-// OpenAI declaration for AI
 const { generateAutoBidForBusiness } = require('./Autobid');
-
-// Google Calendar routes
 const googleCalendarRoutes = require('./google-calendar/routes');
-
-// Google Places routes
 const googlePlacesRoutes = require('./google-places/routes');
-
-// Initialize Resend with the API key
+const authRoutes = require('./auth/routes');
 const resend = new Resend(process.env.RESEND_API_KEY);
-
 const http = require("http");
 const { Server } = require("socket.io");
-
-// Set your Stripe secret key. Remember to switch to your live secret key in production.
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY,
   {
     apiVersion: "2023-10-16",
   }
 );
 
+const app = express();
+
 // Trust proxy - needed for proper rate limiting behind Vercel
 app.set('trust proxy', 1);
 
-// Enable CORS with the frontend's URL to allow api requests from the site
-app.use(cors({
-  origin: ['https://www.savewithbidi.com', 'http://localhost:3000'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+// CORS configuration
+const corsOptions = {
+  origin: process.env.NODE_ENV === 'production'
+    ? ['https://www.savewithbidi.com']
+    : ['http://localhost:3000'],
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
-  exposedHeaders: ['Content-Range', 'X-Content-Range', 'Authorization'],
   maxAge: 86400 // 24 hours
-}));
+};
+
+app.use(cors(corsOptions));
+
+// Security middleware
+app.use((req, res, next) => {
+  // Set security headers
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';");
+  next();
+});
 
 app.use(express.json());
 
+// Mount Auth routes first
+app.use('/api/auth', authRoutes);
+
 // Mount Google Calendar routes
-app.use('/api/calendar', googleCalendarRoutes);
+app.use('/api/google-calendar', googleCalendarRoutes);
 
 // Mount Google Places routes
 app.use('/api/google-places', googlePlacesRoutes);
@@ -649,7 +648,7 @@ app.post('/trigger-autobid', async (req, res) => {
       for (const business of eligibleBusinesses) {
         const autoBid = await generateAutoBidForBusiness(business.id, requestDetails);
         if (autoBid) {
-            console.log(`�� Auto-bid generated for Business ${business.id}:`, autoBid);
+            console.log(` Auto-bid generated for Business ${business.id}:`, autoBid);
             bidsGenerated.push({
                 business_id: business.id,
                 bid_amount: autoBid.bidAmount,
