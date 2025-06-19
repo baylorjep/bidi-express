@@ -25,18 +25,39 @@ const app = express();
 // Trust proxy - needed for proper rate limiting behind Vercel
 app.set('trust proxy', 1);
 
+// Debug environment
+console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('VERCEL_ENV:', process.env.VERCEL_ENV);
+
 // CORS configuration
 const corsOptions = {
-  origin: process.env.NODE_ENV === 'production'
-    ? ['https://www.savewithbidi.com']
-    : ['http://localhost:3000'],
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = [
+      'https://www.savewithbidi.com',
+      'https://savewithbidi.com',
+      'http://localhost:3000'
+    ];
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('CORS blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   credentials: true,
   maxAge: 86400 // 24 hours
 };
 
 app.use(cors(corsOptions));
+
+// Handle preflight requests
+app.options('*', cors(corsOptions));
 
 // Security middleware
 app.use((req, res, next) => {
@@ -84,6 +105,15 @@ app.get('/api/business-profiles/:id', async (req, res) => {
 
 // basic page
 app.get("/", (req, res) => res.send("Bidi Express on Vercel"));
+
+// Test endpoint for CORS
+app.get("/api/test", (req, res) => {
+  res.json({ 
+    message: "API is working", 
+    timestamp: new Date().toISOString(),
+    cors: "enabled"
+  });
+});
 
 // This is the endpoint to create an account session for Stripe onboarding
 app.post("/account_session", async (req, res) => {

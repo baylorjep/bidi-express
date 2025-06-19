@@ -50,6 +50,12 @@ router.get('/availability', async (req, res) => {
 // Get available time slots for a specific date with path parameters
 router.get('/availability/:businessId/:date', async (req, res) => {
   try {
+    // Set CORS headers explicitly
+    res.header('Access-Control-Allow-Origin', 'https://www.savewithbidi.com');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    
     const { businessId, date } = req.params;
     
     if (!businessId || !date) {
