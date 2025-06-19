@@ -4,6 +4,15 @@ const calendarService = require('./calendarService');
 const supabase = require('../supabaseClient');
 const { google } = require('googleapis');
 
+// Health check endpoint
+router.get('/health', (req, res) => {
+  res.json({ 
+    status: "healthy", 
+    service: "google-calendar",
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Initiate OAuth flow
 router.get('/auth', (req, res) => {
   const { businessId } = req.query;

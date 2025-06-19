@@ -115,6 +115,15 @@ app.get("/api/test", (req, res) => {
   });
 });
 
+// Health check endpoint
+app.get("/api/health", (req, res) => {
+  res.json({ 
+    status: "healthy", 
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
 // This is the endpoint to create an account session for Stripe onboarding
 app.post("/account_session", async (req, res) => {
   try {
