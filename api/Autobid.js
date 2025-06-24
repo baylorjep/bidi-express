@@ -460,7 +460,12 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             console.warn("⚠️ No explicit pricing rules found for Business ID:", businessId);
         }
 
-        // Step 4: Get category-specific handler
+        // Step 4: Get training data for enhanced AI generation
+        console.log("🎓 Fetching training data for enhanced AI generation...");
+        const trainingData = await getBusinessTrainingData(businessId, requestDetails.service_category);
+        console.log(`📊 Found ${trainingData.responses?.length || 0} training responses and ${trainingData.feedback?.length || 0} feedback entries`);
+
+        // Step 5: Get category-specific handler
         const category = requestDetails.service_category.toLowerCase();
         const handler = categoryHandlers[category];
 
@@ -469,7 +474,7 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             return null;
         }
 
-        // Step 5: Format request data and bid history using category-specific logic
+        // Step 6: Format request data and bid history using category-specific logic
         const formattedRequestData = handler.formatRequest({
             ...requestDetails,
             businessId
@@ -477,16 +482,17 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
 
         const formattedBidHistory = handler.formatBidHistory(pastBidsWithRequests);
 
-        // Step 6: Generate category-specific AI prompt
-        const prompt = getCategorySpecificPrompt(
+        // Step 7: Generate enhanced AI prompt with training data
+        const prompt = getEnhancedCategorySpecificPrompt(
             category,
             formattedRequestData,
             pricingRules,
-            formattedBidHistory
+            formattedBidHistory,
+            trainingData
         );
 
-        // Step 7: Use OpenAI to Generate the Bid
-        console.log(`📜 **AI Prompt Sent to OpenAI for ${category} category:**`);
+        // Step 8: Use OpenAI to Generate the Bid
+        console.log(`📜 **Enhanced AI Prompt Sent to OpenAI for ${category} category:**`);
         console.log(prompt);
         
         const completion = await openai.chat.completions.create({
@@ -497,7 +503,7 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
 
         const aiBidRaw = completion.choices[0].message.content;
 
-        // **Step 7.5: Clean JSON response before parsing**
+        // **Step 8.5: Clean JSON response before parsing**
         const match = aiBidRaw.match(/```json\n([\s\S]*?)\n```/);
         let aiBidClean = match ? match[1].trim() : aiBidRaw.trim();
 
@@ -510,12 +516,12 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             return null;
         }
 
-        // Step 8: Determine Bid Category
+        // Step 9: Determine Bid Category
         const bidCategory = ["photography", "videography"].includes(category) 
             ? "Photography" 
             : "General";
 
-        // **Step 9: Insert AI-generated bid into Supabase**
+        // **Step 10: Insert AI-generated bid into Supabase**
         const { error: insertError } = await supabase
             .from("bids")
             .insert([
@@ -543,6 +549,258 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
         return null;
     }
 };
+
+// Helper function to get business training data
+async function getBusinessTrainingData(businessId, category) {
+    try {
+        // Fetch business responses for this category
+        const { data: responses, error: responsesError } = await supabase
+            .from('autobid_training_responses')
+            .select(`
+                *,
+                autobid_training_requests(request_data)
+            `)
+            .eq('business_id', businessId)
+            .eq('category', category)
+            .eq('is_training', true)
+            .eq('is_ai_generated', false)
+            .order('created_at', { ascending: true });
+
+        if (responsesError) {
+            console.warn("⚠️ Error fetching training responses:", responsesError.message);
+            return { responses: [], feedback: [] };
+        }
+
+        // Fetch feedback data
+        const { data: feedback, error: feedbackError } = await supabase
+            .from('autobid_training_feedback')
+            .select('*')
+            .eq('business_id', businessId)
+            .order('created_at', { ascending: true });
+
+        if (feedbackError) {
+            console.warn("⚠️ Error fetching feedback:", feedbackError.message);
+            return { responses: responses || [], feedback: [] };
+        }
+
+        return { responses: responses || [], feedback: feedback || [] };
+    } catch (error) {
+        console.warn("⚠️ Error in getBusinessTrainingData:", error.message);
+        return { responses: [], feedback: [] };
+    }
+}
+
+// Enhanced AI prompt function that incorporates training data
+const getEnhancedCategorySpecificPrompt = (category, requestData, pricingRules, bidHistory, trainingData) => {
+    // Process training data for AI
+    const processedTrainingData = processTrainingDataForAI(trainingData);
+    
+    const basePrompt = `
+        You are an AI-powered business assistant and bidding strategist generating competitive bids for a business.
+
+        ### **Business Profile**
+        - **ID:** ${requestData.businessId}  
+        - **Pricing Strategy:**  
+        - **Min Price:** $${pricingRules?.min_price ?? "N/A"}  
+        - **Max Price:** $${pricingRules?.max_price ?? "N/A"}  
+        - **Pricing Model:** ${pricingRules?.pricing_model ?? "Not specified"}  
+        - **Hourly Rate:** $${pricingRules?.hourly_rate ?? "N/A"}  
+        - **Default Message:** ${pricingRules?.default_message ?? "N/A"} 
+        - **Additional Comments:** ${pricingRules?.additional_comments ?? "None"}  
+
+        ### **Business Training Patterns (Enhanced AI)**
+        - **Average Training Bid Amount:** $${processedTrainingData.business_patterns.average_bid_amount.toFixed(2)}
+        - **Pricing Strategy from Training:** ${Object.entries(processedTrainingData.pricing_strategy).filter(([k,v]) => v).map(([k,v]) => k.replace('_', ' ')).join(', ')}
+        - **Service Emphasis from Training:** ${processedTrainingData.service_preferences.join(', ')}
+        - **Description Style from Training:** ${processedTrainingData.business_patterns.description_style}
+        - **Pricing Factors from Training:** ${processedTrainingData.business_patterns.pricing_factors.join(', ')}
+        - **Training Feedback Approval Rate:** ${(processedTrainingData.feedback_preferences.approval_rate * 100).toFixed(1)}%
+        - **Common Issues to Avoid:** ${processedTrainingData.feedback_preferences.common_issues.join(', ')}
+
+        ### **Past Bid History:**  
+        ${bidHistory}
+
+        ### **New Service Request**  
+        ${requestData.formattedRequest}
+
+        ### **Category-Specific Bidding Strategy**
+        ${requestData.categoryStrategy}
+
+        ### **Training Data Integration Instructions**
+        Use the business's training patterns to enhance your bid:
+        1. **Match their average pricing** - Stay close to their training bid average
+        2. **Follow their pricing strategy** - Use their preferred pricing approach
+        3. **Emphasize their preferred services** - Highlight services they typically include
+        4. **Match their description style** - Use their preferred level of detail
+        5. **Avoid their common issues** - Steer clear of problems they've identified
+        6. **Consider their feedback patterns** - Learn from their approval/rejection history
+
+        ### **Return JSON format ONLY:**  
+        \`\`\`json
+        {
+            "bidAmount": <calculated bid price>,
+            "bidDescription": "<concise bid message>"
+        }
+        \`\`\`
+    `;
+
+    return basePrompt;
+};
+
+// Process training data for AI (reused from training system)
+function processTrainingDataForAI(trainingData) {
+    const processedData = {
+        business_patterns: analyzeBusinessPatterns(trainingData.responses),
+        pricing_strategy: extractPricingStrategy(trainingData.responses),
+        feedback_preferences: analyzeFeedbackPreferences(trainingData.feedback),
+        service_preferences: extractServicePreferences(trainingData.responses)
+    };
+
+    return processedData;
+}
+
+function analyzeBusinessPatterns(responses) {
+    const patterns = {
+        average_bid_amount: 0,
+        pricing_factors: [],
+        service_emphasis: [],
+        description_style: ''
+    };
+
+    if (responses.length > 0) {
+        // Calculate average bid amount
+        const totalAmount = responses.reduce((sum, response) => sum + parseFloat(response.bid_amount), 0);
+        patterns.average_bid_amount = totalAmount / responses.length;
+
+        // Analyze pricing breakdown patterns
+        patterns.pricing_factors = extractPricingFactors(responses);
+
+        // Analyze service emphasis
+        patterns.service_emphasis = extractServiceEmphasis(responses);
+
+        // Analyze description style
+        patterns.description_style = analyzeDescriptionStyle(responses);
+    }
+
+    return patterns;
+}
+
+function extractPricingStrategy(responses) {
+    const strategies = {
+        premium_pricing: false,
+        competitive_pricing: false,
+        value_based_pricing: false,
+        cost_plus_pricing: false
+    };
+
+    // Analyze pricing reasoning to determine strategy
+    responses.forEach(response => {
+        const reasoning = response.pricing_reasoning?.toLowerCase() || '';
+
+        if (reasoning.includes('premium') || reasoning.includes('high-end')) {
+            strategies.premium_pricing = true;
+        }
+        if (reasoning.includes('competitive') || reasoning.includes('market rate')) {
+            strategies.competitive_pricing = true;
+        }
+        if (reasoning.includes('value') || reasoning.includes('quality')) {
+            strategies.value_based_pricing = true;
+        }
+        if (reasoning.includes('cost') || reasoning.includes('overhead')) {
+            strategies.cost_plus_pricing = true;
+        }
+    });
+
+    return strategies;
+}
+
+function extractPricingFactors(responses) {
+    const factors = [];
+    responses.forEach(response => {
+        const breakdown = response.pricing_breakdown?.toLowerCase() || '';
+        if (breakdown.includes('hour') || breakdown.includes('time')) factors.push('hourly_rate');
+        if (breakdown.includes('person') || breakdown.includes('guest')) factors.push('per_person');
+        if (breakdown.includes('equipment') || breakdown.includes('gear')) factors.push('equipment');
+        if (breakdown.includes('travel') || breakdown.includes('mileage')) factors.push('travel');
+        if (breakdown.includes('editing') || breakdown.includes('post')) factors.push('post_production');
+    });
+    return [...new Set(factors)];
+}
+
+function extractServiceEmphasis(responses) {
+    const emphasis = [];
+    responses.forEach(response => {
+        const description = response.bid_description?.toLowerCase() || '';
+        if (description.includes('premium') || description.includes('luxury')) emphasis.push('premium_quality');
+        if (description.includes('experience') || description.includes('professional')) emphasis.push('experience');
+        if (description.includes('package') || description.includes('complete')) emphasis.push('comprehensive_packages');
+        if (description.includes('custom') || description.includes('personalized')) emphasis.push('customization');
+    });
+    return [...new Set(emphasis)];
+}
+
+function analyzeDescriptionStyle(responses) {
+    const descriptions = responses.map(r => r.bid_description || '').join(' ');
+    const wordCount = descriptions.split(' ').length;
+    
+    if (wordCount > 200) return 'detailed';
+    if (wordCount > 100) return 'moderate';
+    return 'concise';
+}
+
+function analyzeFeedbackPreferences(feedback) {
+    const preferences = {
+        approval_rate: 0,
+        common_issues: [],
+        preferred_improvements: []
+    };
+
+    if (feedback.length > 0) {
+        const approvals = feedback.filter(f => f.feedback_type === 'approved').length;
+        preferences.approval_rate = approvals / feedback.length;
+
+        // Extract common issues from rejected feedback
+        const rejectedFeedback = feedback.filter(f => f.feedback_type === 'rejected');
+        preferences.common_issues = extractCommonIssues(rejectedFeedback);
+    }
+
+    return preferences;
+}
+
+function extractCommonIssues(rejectedFeedback) {
+    const issues = [];
+
+    rejectedFeedback.forEach(feedback => {
+        const text = feedback.feedback_text?.toLowerCase() || '';
+
+        if (text.includes('too high') || text.includes('expensive')) {
+            issues.push('pricing_too_high');
+        }
+        if (text.includes('too low') || text.includes('cheap')) {
+            issues.push('pricing_too_low');
+        }
+        if (text.includes('missing') || text.includes('incomplete')) {
+            issues.push('incomplete_description');
+        }
+        if (text.includes('wrong') || text.includes('incorrect')) {
+            issues.push('incorrect_services');
+        }
+    });
+
+    return [...new Set(issues)];
+}
+
+function extractServicePreferences(responses) {
+    const preferences = [];
+    responses.forEach(response => {
+        const description = response.bid_description?.toLowerCase() || '';
+        if (description.includes('full day') || description.includes('complete coverage')) preferences.push('full_coverage');
+        if (description.includes('engagement') || description.includes('pre-wedding')) preferences.push('engagement_sessions');
+        if (description.includes('album') || description.includes('prints')) preferences.push('physical_products');
+        if (description.includes('online') || description.includes('digital')) preferences.push('digital_delivery');
+    });
+    return [...new Set(preferences)];
+}
 
 // Export function
 module.exports = { generateAutoBidForBusiness };
