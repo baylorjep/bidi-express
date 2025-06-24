@@ -813,9 +813,18 @@ app.post('/trigger-autobid', async (req, res) => {
       console.log(`📊 Found ${autoBidBusinesses?.length || 0} businesses with auto-bidding enabled`);
 
       // Filter businesses to only include those whose category matches the request's category
-      const eligibleBusinesses = autoBidBusinesses.filter(business =>
-        business.business_category.toLowerCase() === requestDetails.service_category.toLowerCase()
-      );
+      const eligibleBusinesses = autoBidBusinesses.filter(business => {
+        const businessCategories = Array.isArray(business.business_category) 
+          ? business.business_category.map(cat => cat.toLowerCase())
+          : [business.business_category?.toLowerCase() || ''];
+        const requestCategory = requestDetails.service_category.toLowerCase();
+        
+        console.log(`🔍 Business categories:`, businessCategories);
+        console.log(`🔍 Request category: "${requestCategory}"`);
+        console.log(`🔍 Business ${business.id} categories:`, businessCategories);
+        
+        return businessCategories.includes(requestCategory);
+      });
 
       console.log(`🔍 Found ${eligibleBusinesses.length} eligible businesses for category: ${requestDetails.service_category}`);
       console.log("🏢 Eligible businesses:", JSON.stringify(eligibleBusinesses, null, 2));
