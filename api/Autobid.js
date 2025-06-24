@@ -516,6 +516,10 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             return null;
         }
 
+        // Step 8.5: Validate and adjust pricing based on business constraints
+        aiBid = validateAndAdjustPricing(aiBid, pricingRules, trainingData);
+        console.log(`💰 Final adjusted bid: $${aiBid.bidAmount}`);
+
         // Step 9: Determine Bid Category
         const bidCategory = ["photography", "videography"].includes(category) 
             ? "Photography" 
@@ -635,11 +639,29 @@ const getEnhancedCategorySpecificPrompt = (category, requestData, pricingRules, 
         5. **Avoid their common issues** - Steer clear of problems they've identified
         6. **Consider their feedback patterns** - Learn from their approval/rejection history
 
+        ### **CRITICAL PRICING ACCURACY REQUIREMENTS:**
+        1. **Respect Business Constraints:** 
+           - Minimum Price: $${pricingRules?.min_price ?? "No limit"}
+           - Maximum Price: $${pricingRules?.max_price ?? "No limit"}
+           - Hourly Rate: $${pricingRules?.hourly_rate ?? "Not specified"}
+        
+        2. **Base Your Calculation On:**
+           - Training average: $${processedTrainingData.business_patterns.average_bid_amount.toFixed(2)}
+           - Request complexity and requirements
+           - Market rates for this service type
+           - Business's pricing strategy: ${Object.entries(processedTrainingData.pricing_strategy).filter(([k,v]) => v).map(([k,v]) => k.replace('_', ' ')).join(', ')}
+        
+        3. **Avoid Common Mistakes:**
+           - Don't price too low (below $50 for any service)
+           - Don't price too high (above $50,000 unless justified)
+           - Don't ignore the client's budget range if specified
+           - Don't forget to include all requested services in the price
+
         ### **Return JSON format ONLY:**  
         \`\`\`json
         {
-            "bidAmount": <calculated bid price>,
-            "bidDescription": "<concise bid message>"
+            "bidAmount": <calculated bid price - must be a number>,
+            "bidDescription": "<detailed bid description matching business style>"
         }
         \`\`\`
     `;
@@ -800,6 +822,58 @@ function extractServicePreferences(responses) {
         if (description.includes('online') || description.includes('digital')) preferences.push('digital_delivery');
     });
     return [...new Set(preferences)];
+}
+
+// Pricing validation and adjustment function
+function validateAndAdjustPricing(aiBid, pricingRules, trainingData) {
+    let adjustedBid = { ...aiBid };
+    const bidAmount = parseFloat(aiBid.bidAmount);
+    
+    console.log(`🔍 Validating bid amount: $${bidAmount}`);
+    
+    // Apply business pricing constraints
+    if (pricingRules) {
+        const minPrice = parseFloat(pricingRules.min_price);
+        const maxPrice = parseFloat(pricingRules.max_price);
+        
+        if (!isNaN(minPrice) && bidAmount < minPrice) {
+            console.log(`⚠️ Bid $${bidAmount} below minimum $${minPrice}, adjusting up`);
+            adjustedBid.bidAmount = minPrice;
+        }
+        
+        if (!isNaN(maxPrice) && bidAmount > maxPrice) {
+            console.log(`⚠️ Bid $${bidAmount} above maximum $${maxPrice}, adjusting down`);
+            adjustedBid.bidAmount = maxPrice;
+        }
+    }
+    
+    // Apply training data insights
+    if (trainingData.responses && trainingData.responses.length > 0) {
+        const avgTrainingBid = trainingData.responses.reduce((sum, r) => sum + parseFloat(r.bid_amount), 0) / trainingData.responses.length;
+        const trainingVariance = 0.2; // Allow 20% variance from training average
+        
+        const minTrainingPrice = avgTrainingBid * (1 - trainingVariance);
+        const maxTrainingPrice = avgTrainingBid * (1 + trainingVariance);
+        
+        if (adjustedBid.bidAmount < minTrainingPrice) {
+            console.log(`⚠️ Bid $${adjustedBid.bidAmount} below training minimum $${minTrainingPrice.toFixed(2)}, adjusting up`);
+            adjustedBid.bidAmount = Math.round(minTrainingPrice);
+        }
+        
+        if (adjustedBid.bidAmount > maxTrainingPrice) {
+            console.log(`⚠️ Bid $${adjustedBid.bidAmount} above training maximum $${maxTrainingPrice.toFixed(2)}, adjusting down`);
+            adjustedBid.bidAmount = Math.round(maxTrainingPrice);
+        }
+    }
+    
+    // Ensure bid is a reasonable amount (not too low or too high)
+    const finalAmount = Math.max(50, Math.min(50000, adjustedBid.bidAmount)); // $50-$50k range
+    if (finalAmount !== adjustedBid.bidAmount) {
+        console.log(`⚠️ Bid adjusted to reasonable range: $${finalAmount}`);
+        adjustedBid.bidAmount = finalAmount;
+    }
+    
+    return adjustedBid;
 }
 
 // Export function
