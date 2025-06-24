@@ -650,19 +650,115 @@ app.post('/trigger-autobid', async (req, res) => {
   try {
       console.log(`🆕 Auto-bid triggered for Request ID: ${request_id}`);
 
-      // Fetch request details using correct column names
-      const { data: requestDetails, error: requestError } = await supabase
-          .from("requests")
-          .select("id, service_category, service_title, location, service_date, end_date, service_description")
-          .eq("id", request_id)
-          .single();
+      // Helper function to determine the correct table name based on category
+      const getTableNameForCategory = (category) => {
+          const categoryMap = {
+              'catering': 'catering_requests',
+              'dj': 'dj_requests',
+              'beauty': 'beauty_requests',
+              'florist': 'florist_requests',
+              'wedding_planning': 'wedding_planning_requests',
+              'videography': 'videography_requests',
+              'photography': 'photography_requests'
+          };
+          
+          const normalizedCategory = category.toLowerCase().replace(/\s+/g, '_');
+          return categoryMap[normalizedCategory] || null;
+      };
 
-      if (requestError || !requestDetails) {
-          console.error(`❌ Error fetching request details:`, requestError);
+      // Helper function to get standardized request details from any category table
+      const getStandardizedRequestDetails = (requestData, category) => {
+          const baseDetails = {
+              id: requestData.id,
+              service_category: category,
+              location: requestData.location || 'Unknown',
+              start_date: requestData.start_date || requestData.service_date || 'Unknown',
+              end_date: requestData.end_date || 'Unknown',
+              additional_comments: requestData.additional_comments || requestData.special_requests || 'No additional comments'
+          };
+
+          // Category-specific field mappings
+          switch (category.toLowerCase()) {
+              case 'catering':
+                  return {
+                      ...baseDetails,
+                      service_title: requestData.title || 'Catering Service',
+                      service_description: `Event Type: ${requestData.event_type || 'Unknown'}, Guests: ${requestData.estimated_guests || 'Unknown'}, Food Preferences: ${JSON.stringify(requestData.food_preferences || {})}, Budget: ${requestData.budget_range || 'Not specified'}`
+                  };
+              case 'dj':
+                  return {
+                      ...baseDetails,
+                      service_title: requestData.title || 'DJ Service',
+                      service_description: `Event Type: ${requestData.event_type || 'Unknown'}, Duration: ${requestData.event_duration || 'Unknown'} hours, Guests: ${requestData.estimated_guests || 'Unknown'}, Music Preferences: ${JSON.stringify(requestData.music_preferences || {})}, Budget: ${requestData.budget_range || 'Not specified'}`
+                  };
+              case 'beauty':
+                  return {
+                      ...baseDetails,
+                      service_title: requestData.event_title || 'Beauty Service',
+                      service_description: `Event Type: ${requestData.event_type || 'Unknown'}, Service Type: ${requestData.service_type || 'Unknown'}, Number of People: ${requestData.num_people || 'Unknown'}, Price Range: ${requestData.price_range || 'Not specified'}`
+                  };
+              case 'florist':
+                  return {
+                      ...baseDetails,
+                      service_title: requestData.event_title || 'Florist Service',
+                      service_description: `Event Type: ${requestData.event_type || 'Unknown'}, Floral Arrangements: ${JSON.stringify(requestData.floral_arrangements || {})}, Flower Preferences: ${JSON.stringify(requestData.flower_preferences || {})}, Price Range: ${requestData.price_range || 'Not specified'}`
+                  };
+              case 'wedding_planning':
+                  return {
+                      ...baseDetails,
+                      service_title: requestData.event_title || 'Wedding Planning Service',
+                      service_description: `Event Type: ${requestData.event_type || 'Unknown'}, Guest Count: ${requestData.guest_count || 'Unknown'}, Planning Level: ${requestData.planning_level || 'Unknown'}, Budget Range: ${requestData.budget_range || 'Not specified'}`
+                  };
+              case 'videography':
+                  return {
+                      ...baseDetails,
+                      service_title: requestData.event_title || 'Videography Service',
+                      service_description: `Event Type: ${requestData.event_type || 'Unknown'}, Duration: ${requestData.duration || 'Unknown'} hours, Number of People: ${requestData.num_people || 'Unknown'}, Style Preferences: ${JSON.stringify(requestData.style_preferences || {})}, Price Range: ${requestData.price_range || 'Not specified'}`
+                  };
+              case 'photography':
+                  return {
+                      ...baseDetails,
+                      service_title: requestData.event_title || 'Photography Service',
+                      service_description: `Event Type: ${requestData.event_type || 'Unknown'}, Duration: ${requestData.duration || 'Unknown'} hours, Number of People: ${requestData.num_people || 'Unknown'}, Style Preferences: ${JSON.stringify(requestData.style_preferences || {})}, Price Range: ${requestData.price_range || 'Not specified'}`
+                  };
+              default:
+                  return {
+                      ...baseDetails,
+                      service_title: 'Unknown Service',
+                      service_description: 'Service details not available'
+                  };
+          }
+      };
+
+      // Fetch request details from the appropriate category table
+      let requestDetails = null;
+      let foundCategory = null;
+
+      const categories = ['catering', 'dj', 'beauty', 'florist', 'wedding_planning', 'videography', 'photography'];
+      
+      for (const category of categories) {
+          const tableName = getTableNameForCategory(category);
+          if (!tableName) continue;
+
+          const { data, error } = await supabase
+              .from(tableName)
+              .select("*")
+              .eq("id", request_id)
+              .single();
+
+          if (!error && data) {
+              requestDetails = getStandardizedRequestDetails(data, category);
+              foundCategory = category;
+              break;
+          }
+      }
+
+      if (!requestDetails || !foundCategory) {
+          console.error(`❌ Request not found in any category table for ID: ${request_id}`);
           return res.status(404).json({ error: "Request not found." });
       }
 
-      console.log(`🔍 Retrieved request details:`, requestDetails);
+      console.log(`🔍 Retrieved request details from ${foundCategory} table:`, requestDetails);
 
       // Find businesses with Auto-Bidding enabled
       const { data: autoBidBusinesses, error: businessError } = await supabase

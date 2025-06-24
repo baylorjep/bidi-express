@@ -4,6 +4,398 @@ const supabase = require("./supabaseClient");
 // Initialize OpenAI with API Key
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// Helper function to determine the correct table name based on category
+const getTableNameForCategory = (category) => {
+    const categoryMap = {
+        'catering': 'catering_requests',
+        'dj': 'dj_requests',
+        'beauty': 'beauty_requests',
+        'florist': 'florist_requests',
+        'wedding_planning': 'wedding_planning_requests',
+        'videography': 'videography_requests',
+        'photography': 'photography_requests'
+    };
+    
+    const normalizedCategory = category.toLowerCase().replace(/\s+/g, '_');
+    return categoryMap[normalizedCategory] || null;
+};
+
+// Category-specific bidding strategies
+const getCategorySpecificPrompt = (category, requestData, pricingRules, bidHistory) => {
+    const basePrompt = `
+        You are an AI-powered business assistant and bidding strategist generating competitive bids for a business.
+
+        ### **Business Profile**
+        - **ID:** ${requestData.businessId}  
+        - **Pricing Strategy:**  
+        - **Min Price:** $${pricingRules?.min_price ?? "N/A"}  
+        - **Max Price:** $${pricingRules?.max_price ?? "N/A"}  
+        - **Pricing Model:** ${pricingRules?.pricing_model ?? "Not specified"}  
+        - **Hourly Rate:** $${pricingRules?.hourly_rate ?? "N/A"}  
+        - **Default Message:** ${pricingRules?.default_message ?? "N/A"} 
+        - **Additional Comments:** ${pricingRules?.additional_comments ?? "None"}  
+
+        ### **Past Bid History:**  
+        ${bidHistory}
+
+        ### **New Service Request**  
+        ${requestData.formattedRequest}
+
+        ### **Category-Specific Bidding Strategy**
+        ${requestData.categoryStrategy}
+
+        ### **Return JSON format ONLY:**  
+        \`\`\`json
+        {
+            "bidAmount": <calculated bid price>,
+            "bidDescription": "<concise bid message>"
+        }
+        \`\`\`
+    `;
+
+    return basePrompt;
+};
+
+// Category-specific request formatters and strategies
+const categoryHandlers = {
+    catering: {
+        formatRequest: (data) => ({
+            businessId: data.businessId,
+            formattedRequest: `
+                - **Service:** ${data.title || 'Catering Service'}
+                - **Category:** Catering
+                - **Event Type:** ${data.event_type || 'Unknown'}
+                - **Location:** ${data.location || 'Unknown'}
+                - **Date:** ${data.start_date || 'Unknown'}
+                - **Guest Count:** ${data.estimated_guests || 'Unknown'}
+                - **Food Preferences:** ${JSON.stringify(data.food_preferences || {})}
+                - **Budget Range:** ${data.budget_range || 'Not specified'}
+                - **Equipment Needs:** ${data.equipment_needed || 'Not specified'}
+                - **Setup/Cleanup:** ${data.setup_cleanup || 'Not specified'}
+                - **Food Service Type:** ${data.food_service_type || 'Not specified'}
+                - **Serving Staff:** ${data.serving_staff || 'Not specified'}
+                - **Dietary Restrictions:** ${JSON.stringify(data.dietary_restrictions || [])}
+                - **Additional Comments:** ${data.additional_comments || 'None'}
+            `,
+            categoryStrategy: `
+                **CATERING-SPECIFIC PRICING FACTORS:**
+                1. **Per-Person Pricing:** Base cost per guest (typically $15-50+ per person)
+                2. **Guest Count Impact:** Higher guest counts often reduce per-person cost due to economies of scale
+                3. **Food Complexity:** Premium cuisines (French, Italian) cost more than basic options
+                4. **Service Level:** Full-service (staff, setup, cleanup) vs. delivery-only
+                5. **Equipment Needs:** Venue equipment vs. bringing everything
+                6. **Dietary Restrictions:** Special dietary needs may increase costs
+                7. **Event Type:** Weddings typically command premium pricing
+                8. **Location:** Travel distance and venue accessibility
+                9. **Setup/Cleanup:** Additional labor costs for full service
+                10. **Serving Staff:** Number of servers needed based on guest count
+
+                **BIDDING APPROACH:**
+                - Start with base per-person cost × guest count
+                - Add service fees for setup/cleanup if required
+                - Adjust for food complexity and dietary restrictions
+                - Consider equipment rental if venue doesn't provide
+                - Factor in travel distance and event type premium
+                - Stay within business pricing constraints
+            `
+        }),
+        formatBidHistory: (bids) => bids.map((bid, index) => {
+            const request = bid.requestDetails;
+            return `Bid ${index + 1}: $${bid.bid_amount} - "${bid.bid_description}" 
+            for ${request.event_type || 'Unknown'} event with ${request.estimated_guests || 'Unknown'} guests in ${request.location || 'Unknown'}`;
+        }).join("\n\n")
+    },
+
+    dj: {
+        formatRequest: (data) => ({
+            businessId: data.businessId,
+            formattedRequest: `
+                - **Service:** ${data.title || 'DJ Service'}
+                - **Category:** DJ
+                - **Event Type:** ${data.event_type || 'Unknown'}
+                - **Location:** ${data.location || 'Unknown'}
+                - **Date:** ${data.start_date || 'Unknown'}
+                - **Duration:** ${data.event_duration || 'Unknown'} hours
+                - **Guest Count:** ${data.estimated_guests || 'Unknown'}
+                - **Music Preferences:** ${JSON.stringify(data.music_preferences || {})}
+                - **Budget Range:** ${data.budget_range || 'Not specified'}
+                - **Equipment Needs:** ${data.equipment_needed || 'Not specified'}
+                - **Additional Services:** ${JSON.stringify(data.additional_services || {})}
+                - **Special Requests:** ${data.special_requests || 'None'}
+            `,
+            categoryStrategy: `
+                **DJ-SPECIFIC PRICING FACTORS:**
+                1. **Hourly Rate:** Base rate per hour (typically $100-300+ per hour)
+                2. **Event Duration:** Longer events may have discounted hourly rates
+                3. **Event Type:** Weddings command premium pricing vs. corporate events
+                4. **Equipment Needs:** Bringing full setup vs. venue equipment
+                5. **Additional Services:** MC services, lighting, photo booth add-ons
+                6. **Music Complexity:** Multiple genres, special requests, custom playlists
+                7. **Guest Count:** Larger crowds may require more equipment/power
+                8. **Location:** Travel distance and venue accessibility
+                9. **Setup/Teardown Time:** Additional hours for equipment setup
+                10. **Experience Level:** Premium DJs command higher rates
+
+                **BIDDING APPROACH:**
+                - Start with base hourly rate × event duration
+                - Add setup/teardown time if needed
+                - Include additional services (MC, lighting, etc.)
+                - Adjust for event type premium (weddings)
+                - Factor in equipment needs and travel distance
+                - Consider music complexity and special requests
+                - Stay within business pricing constraints
+            `
+        }),
+        formatBidHistory: (bids) => bids.map((bid, index) => {
+            const request = bid.requestDetails;
+            return `Bid ${index + 1}: $${bid.bid_amount} - "${bid.bid_description}" 
+            for ${request.event_type || 'Unknown'} event lasting ${request.event_duration || 'Unknown'} hours in ${request.location || 'Unknown'}`;
+        }).join("\n\n")
+    },
+
+    beauty: {
+        formatRequest: (data) => ({
+            businessId: data.businessId,
+            formattedRequest: `
+                - **Service:** ${data.event_title || 'Beauty Service'}
+                - **Category:** Beauty
+                - **Event Type:** ${data.event_type || 'Unknown'}
+                - **Location:** ${data.location || 'Unknown'}
+                - **Date:** ${data.start_date || 'Unknown'}
+                - **Service Type:** ${data.service_type || 'Unknown'}
+                - **Number of People:** ${data.num_people || 'Unknown'}
+                - **Price Range:** ${data.price_range || 'Not specified'}
+                - **Hairstyle Preferences:** ${data.hairstyle_preferences || 'Not specified'}
+                - **Makeup Style:** ${data.makeup_style_preferences || 'Not specified'}
+                - **Trial Sessions:** Hair: ${data.trial_session_hair || 'No'}, Makeup: ${data.trial_session_makeup || 'No'}
+                - **On-Site Service:** ${data.on_site_service_needed || 'No'}
+                - **Additional Comments:** ${data.additional_comments || 'None'}
+            `,
+            categoryStrategy: `
+                **BEAUTY-SPECIFIC PRICING FACTORS:**
+                1. **Per-Person Rate:** Base cost per person (typically $100-300+ per person)
+                2. **Service Type:** Hair only, makeup only, or both services
+                3. **Event Type:** Weddings command premium pricing
+                4. **Trial Sessions:** Additional cost for hair/makeup trials
+                5. **On-Site Service:** Travel fee for venue services
+                6. **Complexity:** Intricate hairstyles or elaborate makeup
+                7. **Group Discounts:** Multiple people may qualify for discounts
+                8. **Experience Level:** Premium stylists command higher rates
+                9. **Products Used:** Premium products may increase costs
+                10. **Time Requirements:** Complex styles require more time
+
+                **BIDDING APPROACH:**
+                - Start with base per-person rate × number of people
+                - Add service type multiplier (hair + makeup = higher rate)
+                - Include trial session costs if requested
+                - Add travel fee for on-site service
+                - Apply group discount for multiple people
+                - Factor in complexity and time requirements
+                - Consider event type premium (weddings)
+                - Stay within business pricing constraints
+            `
+        }),
+        formatBidHistory: (bids) => bids.map((bid, index) => {
+            const request = bid.requestDetails;
+            return `Bid ${index + 1}: $${bid.bid_amount} - "${bid.bid_description}" 
+            for ${request.service_type || 'Unknown'} service for ${request.num_people || 'Unknown'} people in ${request.location || 'Unknown'}`;
+        }).join("\n\n")
+    },
+
+    florist: {
+        formatRequest: (data) => ({
+            businessId: data.businessId,
+            formattedRequest: `
+                - **Service:** ${data.event_title || 'Florist Service'}
+                - **Category:** Florist
+                - **Event Type:** ${data.event_type || 'Unknown'}
+                - **Location:** ${data.location || 'Unknown'}
+                - **Date:** ${data.start_date || 'Unknown'}
+                - **Price Range:** ${data.price_range || 'Not specified'}
+                - **Flower Preferences:** ${JSON.stringify(data.flower_preferences || {})}
+                - **Floral Arrangements:** ${JSON.stringify(data.floral_arrangements || {})}
+                - **Additional Services:** ${JSON.stringify(data.additional_services || {})}
+                - **Colors:** ${JSON.stringify(data.colors || [])}
+                - **Additional Comments:** ${data.additional_comments || 'None'}
+            `,
+            categoryStrategy: `
+                **FLORIST-SPECIFIC PRICING FACTORS:**
+                1. **Arrangement Types:** Bouquets, boutonnieres, centerpieces, arches
+                2. **Flower Types:** Premium flowers (peonies, roses) vs. seasonal blooms
+                3. **Quantity:** Number of each arrangement type
+                4. **Seasonality:** Off-season flowers cost more
+                5. **Complexity:** Intricate designs vs. simple arrangements
+                6. **Additional Services:** Setup, delivery, consultation
+                7. **Event Type:** Weddings command premium pricing
+                8. **Location:** Delivery distance and setup requirements
+                9. **Color Requirements:** Specific color matching may increase costs
+                10. **Timeline:** Rush orders may incur additional fees
+
+                **BIDDING APPROACH:**
+                - Calculate cost per arrangement type × quantity
+                - Factor in flower type costs (premium vs. seasonal)
+                - Add setup and delivery fees if required
+                - Consider complexity and design requirements
+                - Apply event type premium (weddings)
+                - Factor in seasonality and color requirements
+                - Include consultation fee if needed
+                - Stay within business pricing constraints
+            `
+        }),
+        formatBidHistory: (bids) => bids.map((bid, index) => {
+            const request = bid.requestDetails;
+            return `Bid ${index + 1}: $${bid.bid_amount} - "${bid.bid_description}" 
+            for ${request.event_type || 'Unknown'} with ${JSON.stringify(request.floral_arrangements || {})} in ${request.location || 'Unknown'}`;
+        }).join("\n\n")
+    },
+
+    wedding_planning: {
+        formatRequest: (data) => ({
+            businessId: data.businessId,
+            formattedRequest: `
+                - **Service:** ${data.event_title || 'Wedding Planning Service'}
+                - **Category:** Wedding Planning
+                - **Event Type:** ${data.event_type || 'Unknown'}
+                - **Location:** ${data.location || 'Unknown'}
+                - **Date:** ${data.start_date || 'Unknown'}
+                - **Guest Count:** ${data.guest_count || 'Unknown'}
+                - **Planning Level:** ${data.planning_level || 'Unknown'}
+                - **Experience Level:** ${data.experience_level || 'Unknown'}
+                - **Budget Range:** ${data.budget_range || 'Not specified'}
+                - **Planner Budget:** ${data.planner_budget || 'Not specified'}
+                - **Communication Style:** ${data.communication_style || 'Not specified'}
+                - **Additional Comments:** ${data.additional_comments || 'None'}
+            `,
+            categoryStrategy: `
+                **WEDDING PLANNING-SPECIFIC PRICING FACTORS:**
+                1. **Planning Level:** Full planning, partial planning, day-of coordination
+                2. **Guest Count:** Larger weddings require more coordination
+                3. **Experience Level:** Beginner couples need more guidance
+                4. **Timeline:** Months of planning vs. day-of only
+                5. **Vendor Management:** Number of vendors to coordinate
+                6. **Event Complexity:** Multiple events, destination weddings
+                7. **Communication Needs:** Frequency of meetings and updates
+                8. **Budget Size:** Higher budgets may command higher planner fees
+                9. **Location:** Travel requirements and venue complexity
+                10. **Additional Services:** Rehearsal dinner, welcome party coordination
+
+                **BIDDING APPROACH:**
+                - Base rate for planning level (full/partial/day-of)
+                - Adjust for guest count complexity
+                - Factor in experience level requirements
+                - Consider timeline and communication needs
+                - Add vendor management fees
+                - Include travel costs if needed
+                - Apply budget-based percentage for high-end weddings
+                - Stay within business pricing constraints
+            `
+        }),
+        formatBidHistory: (bids) => bids.map((bid, index) => {
+            const request = bid.requestDetails;
+            return `Bid ${index + 1}: $${bid.bid_amount} - "${bid.bid_description}" 
+            for ${request.planning_level || 'Unknown'} planning for ${request.guest_count || 'Unknown'} guests in ${request.location || 'Unknown'}`;
+        }).join("\n\n")
+    },
+
+    videography: {
+        formatRequest: (data) => ({
+            businessId: data.businessId,
+            formattedRequest: `
+                - **Service:** ${data.event_title || 'Videography Service'}
+                - **Category:** Videography
+                - **Event Type:** ${data.event_type || 'Unknown'}
+                - **Location:** ${data.location || 'Unknown'}
+                - **Date:** ${data.start_date || 'Unknown'}
+                - **Duration:** ${data.duration || 'Unknown'} hours
+                - **Number of People:** ${data.num_people || 'Unknown'}
+                - **Style Preferences:** ${JSON.stringify(data.style_preferences || {})}
+                - **Deliverables:** ${JSON.stringify(data.deliverables || {})}
+                - **Coverage:** ${JSON.stringify(data.coverage || {})}
+                - **Price Range:** ${data.price_range || 'Not specified'}
+                - **Additional Comments:** ${data.additional_comments || 'None'}
+            `,
+            categoryStrategy: `
+                **VIDEOGRAPHY-SPECIFIC PRICING FACTORS:**
+                1. **Hourly Rate:** Base rate per hour of coverage (typically $150-500+ per hour)
+                2. **Coverage Type:** Ceremony only, reception only, full day
+                3. **Event Duration:** Longer events may have discounted hourly rates
+                4. **Deliverables:** Raw footage, edited video, highlight reel, full film
+                5. **Style Complexity:** Artistic, documentary, traditional styles
+                6. **Equipment:** Multiple cameras, drones, lighting
+                7. **Post-Production:** Editing time, color grading, music licensing
+                8. **Event Type:** Weddings command premium pricing
+                9. **Location:** Travel distance and venue accessibility
+                10. **Timeline:** Rush delivery may incur additional fees
+
+                **BIDDING APPROACH:**
+                - Start with base hourly rate × coverage duration
+                - Add equipment rental costs if needed
+                - Factor in post-production time and complexity
+                - Include deliverable costs (multiple formats)
+                - Apply event type premium (weddings)
+                - Consider style complexity and artistic requirements
+                - Add travel costs for distant locations
+                - Include rush fees if tight timeline
+                - Stay within business pricing constraints
+            `
+        }),
+        formatBidHistory: (bids) => bids.map((bid, index) => {
+            const request = bid.requestDetails;
+            return `Bid ${index + 1}: $${bid.bid_amount} - "${bid.bid_description}" 
+            for ${request.event_type || 'Unknown'} lasting ${request.duration || 'Unknown'} hours in ${request.location || 'Unknown'}`;
+        }).join("\n\n")
+    },
+
+    photography: {
+        formatRequest: (data) => ({
+            businessId: data.businessId,
+            formattedRequest: `
+                - **Service:** ${data.event_title || 'Photography Service'}
+                - **Category:** Photography
+                - **Event Type:** ${data.event_type || 'Unknown'}
+                - **Location:** ${data.location || 'Unknown'}
+                - **Date:** ${data.start_date || 'Unknown'}
+                - **Duration:** ${data.duration || 'Unknown'} hours
+                - **Number of People:** ${data.num_people || 'Unknown'}
+                - **Style Preferences:** ${JSON.stringify(data.style_preferences || {})}
+                - **Deliverables:** ${JSON.stringify(data.deliverables || {})}
+                - **Coverage:** ${JSON.stringify(data.coverage || {})}
+                - **Price Range:** ${data.price_range || 'Not specified'}
+                - **Additional Comments:** ${data.additional_comments || 'None'}
+            `,
+            categoryStrategy: `
+                **PHOTOGRAPHY-SPECIFIC PRICING FACTORS:**
+                1. **Hourly Rate:** Base rate per hour of coverage (typically $100-400+ per hour)
+                2. **Coverage Type:** Ceremony only, reception only, full day
+                3. **Event Duration:** Longer events may have discounted hourly rates
+                4. **Deliverables:** Digital files, prints, albums, engagement sessions
+                5. **Style Complexity:** Artistic, documentary, traditional styles
+                6. **Equipment:** Multiple cameras, lenses, lighting
+                7. **Post-Production:** Editing time, retouching, album design
+                8. **Event Type:** Weddings command premium pricing
+                9. **Location:** Travel distance and venue accessibility
+                10. **Second Photographer:** Additional photographer costs
+
+                **BIDDING APPROACH:**
+                - Start with base hourly rate × coverage duration
+                - Add second photographer if needed
+                - Factor in post-production time and complexity
+                - Include deliverable costs (albums, prints, etc.)
+                - Apply event type premium (weddings)
+                - Consider style complexity and artistic requirements
+                - Add travel costs for distant locations
+                - Include engagement session if included
+                - Stay within business pricing constraints
+            `
+        }),
+        formatBidHistory: (bids) => bids.map((bid, index) => {
+            const request = bid.requestDetails;
+            return `Bid ${index + 1}: $${bid.bid_amount} - "${bid.bid_description}" 
+            for ${request.event_type || 'Unknown'} lasting ${request.duration || 'Unknown'} hours in ${request.location || 'Unknown'}`;
+        }).join("\n\n")
+    }
+};
+
 const generateAutoBidForBusiness = async (businessId, requestDetails) => {
     try {
         console.log(`🔍 Fetching past bids & request details for Business ID: ${businessId}`);
@@ -21,32 +413,40 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             return null;
         }
 
-        // Step 2: Fetch request details manually for each bid
+        // Step 2: Fetch request details manually for each bid from appropriate tables
         let pastBidsWithRequests = [];
 
         for (const bid of pastBids) {
-            const { data: requestDetails, error: requestError } = await supabase
-                .from("requests") // Querying the "requests" table
-                .select("service_category, service_title, location, service_date, end_date, service_description, additional_comments")
-                .eq("id", bid.request_id)
-                .maybeSingle(); // ✅ Prevents errors if no record is found
+            // Try to find the request in each category table
+            let requestData = null;
+            let foundCategory = null;
 
-            if (requestError) {
-                console.warn(`⚠️ Error fetching request for request_id ${bid.request_id}:`, requestError.message);
+            const categories = ['catering', 'dj', 'beauty', 'florist', 'wedding_planning', 'videography', 'photography'];
+            
+            for (const category of categories) {
+                const tableName = getTableNameForCategory(category);
+                if (!tableName) continue;
+
+                const { data, error } = await supabase
+                    .from(tableName)
+                    .select("*")
+                    .eq("id", bid.request_id)
+                    .maybeSingle();
+
+                if (!error && data) {
+                    requestData = data;
+                    foundCategory = category;
+                    break;
+                }
             }
 
-            pastBidsWithRequests.push({
-                ...bid,
-                requestDetails: requestDetails || { // ✅ Provide default values if request is missing
-                    service_category: "Unknown",
-                    service_title: "Unknown Service",
-                    location: "Unknown",
-                    service_date: "Unknown",
-                    end_date: "Unknown",
-                    service_description: "No details provided",
-                    additional_comments: "No details provided"
-                },
-            });
+            if (requestData && foundCategory) {
+                pastBidsWithRequests.push({
+                    ...bid,
+                    requestDetails: requestData,
+                    category: foundCategory
+                });
+            }
         }
 
         // Step 3: Retrieve the business's pricing rules
@@ -60,109 +460,62 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             console.warn("⚠️ No explicit pricing rules found for Business ID:", businessId);
         }
 
-        // Extract pricing details safely
-        const pricingDetails = pricingRules
-            ? `
-            **Pricing Strategy:**  
-            - **Min Price:** $${pricingRules?.min_price ?? "N/A"}  
-            - **Max Price:** $${pricingRules?.max_price ?? "N/A"}  
-            - **Pricing Model:** ${pricingRules?.pricing_model ?? "Not specified"}  
-            - **Hourly Rate (if applicable):** $${pricingRules?.hourly_rate ?? "N/A"}  
-            - **Default Message template (if applicable):** $${pricingRules?.default_message ?? "N/A"} 
-            - **Additional Comments:** ${pricingRules?.additional_comments ?? "None"}  
-            `
-            : "This business has not set explicit pricing rules. Use past bids and industry norms to guide the bid.";
+        // Step 4: Get category-specific handler
+        const category = requestDetails.service_category.toLowerCase();
+        const handler = categoryHandlers[category];
 
-        // Step 4: Construct AI Prompt (✅ Fixed `bid.requestDetails`)
-        const bidHistoryText = pastBidsWithRequests.length > 0
-            ? pastBidsWithRequests.map((bid, index) => {
-                const request = bid.requestDetails; // ✅ Fetch associated request details
+        if (!handler) {
+            console.error(`❌ No handler found for category: ${category}`);
+            return null;
+        }
 
-                return `Bid ${index + 1}: $${bid.bid_amount} - "${bid.bid_description}" 
-                for request:
-                - **Service:** ${request.service_title || "Unknown"}
-                - **Category:** ${request.service_category || "Unknown"}
-                - **Location:** ${request.location || "Unknown"}
-                - **Date Range:** ${request.service_date || "Unknown"} - ${request.end_date || "Unknown"}
-                - **Details:** ${request.service_description || "No details provided"}
-                - **Additional Comments:** ${request.additional_comments || "No details provided"}`;
-            }).join("\n\n")
-            : "No bid history available yet.";
+        // Step 5: Format request data and bid history using category-specific logic
+        const formattedRequestData = handler.formatRequest({
+            ...requestDetails,
+            businessId
+        });
 
-        const prompt = `
-            You are an AI-powered business assistant and bidding strategist generating competitive bids for a business.
+        const formattedBidHistory = handler.formatBidHistory(pastBidsWithRequests);
 
-            ### **Business Profile**
-            - **ID:** ${businessId}  
-            - **Past Successful Bids and Job Details:**  
-            ${bidHistoryText}  
-            - **Pricing Strategy & Preferences:**  
-            ${pricingDetails}  
+        // Step 6: Generate category-specific AI prompt
+        const prompt = getCategorySpecificPrompt(
+            category,
+            formattedRequestData,
+            pricingRules,
+            formattedBidHistory
+        );
 
-            ### **New Service Request**  
-            - **Service:** ${requestDetails.service_title}  
-            - **Category:** ${requestDetails.service_category}  
-            - **Location:** ${requestDetails.location}  
-            - **Date Range:** ${requestDetails.service_date} - ${requestDetails.end_date}  
-            - **Details:** ${requestDetails.service_description}  
-            - **Additional Comments:** ${requestDetails.additional_comments}
-
-            ### **⚡ Weighted Bidding Strategy**
-            1. **Start with the pricing rules first**:
-            - Base price: ${pricingRules.min_price}  
-            - Max price cap: ${pricingRules.max_price}  
-            - Per-person, per-hour, or flat-rate: ${pricingRules.pricing_model}  
-            - Rush fees, discounts, or special conditions: ${pricingRules.additional_comments}
-
-            2. **Adjust bid using past successful bids:**
-            - Look at similar past jobs.
-            - Identify **what factors** caused past bids to be higher/lower.
-            - Modify bid accordingly **while staying within pricing constraints**.
-
-            3. **Final sanity check:**
-            - Ensure bid **isn't below min price** or **above max price**.
-            - Format bid description using **business's preferred message template**:
-                - Default template: "${pricingRules.default_message_template}"
-
-            4.  **Return JSON format ONLY:**  
-            \`\`\`json
-            {
-                "bidAmount": <calculated bid price>,
-                "bidDescription": "<concise bid message>"
-            }
-            \`\`\`
-        `;
-
-        // Step 5: Use OpenAI to Generate the Bid
-        console.log("📜 **AI Prompt Sent to OpenAI:**");
-        console.log(prompt); // ✅ This prints the full prompt for debugging
+        // Step 7: Use OpenAI to Generate the Bid
+        console.log(`📜 **AI Prompt Sent to OpenAI for ${category} category:**`);
+        console.log(prompt);
+        
         const completion = await openai.chat.completions.create({
-            model: "gpt-4o-mini", // ✅ Uses stable working model
+            model: "gpt-4o-mini",
             messages: [{ role: "system", content: prompt }],
             temperature: 0.3,
         });
 
         const aiBidRaw = completion.choices[0].message.content;
 
-        // **Step 5.5: Clean JSON response before parsing**
+        // **Step 7.5: Clean JSON response before parsing**
         const match = aiBidRaw.match(/```json\n([\s\S]*?)\n```/);
         let aiBidClean = match ? match[1].trim() : aiBidRaw.trim();
 
         let aiBid;
         try {
             aiBid = JSON.parse(aiBidClean);
-            console.log(`✅ AI-Generated Bid for Business ${businessId}:`, aiBid);
+            console.log(`✅ AI-Generated Bid for Business ${businessId} (${category}):`, aiBid);
         } catch (error) {
             console.error("❌ Error parsing AI bid response:", aiBidClean, error);
             return null;
         }
 
-        // Step 6: Determine Bid Category
-        const bidCategory = ["photography", "videography"].includes(requestDetails.service_category.toLowerCase()) 
+        // Step 8: Determine Bid Category
+        const bidCategory = ["photography", "videography"].includes(category) 
             ? "Photography" 
             : "General";
 
-        // **Step 7: Insert AI-generated bid into Supabase**
+        // **Step 9: Insert AI-generated bid into Supabase**
         const { error: insertError } = await supabase
             .from("bids")
             .insert([
@@ -171,9 +524,9 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
                     user_id: businessId,
                     bid_amount: aiBid.bidAmount,
                     bid_description: aiBid.bidDescription,
-                    category: bidCategory, // Auto-set category based on request
-                    status: "pending", // ✅ Ensures default "pending" status
-                    hidden: null // ✅ Matches your DB defaults
+                    category: bidCategory,
+                    status: "pending",
+                    hidden: null
                 },
             ]);
 
