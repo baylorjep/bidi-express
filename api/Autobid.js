@@ -430,8 +430,8 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
                 const { data, error } = await supabase
                     .from(tableName)
                     .select("*")
-                    .eq("id", bid.request_id)
-                    .maybeSingle();
+                .eq("id", bid.request_id)
+                .maybeSingle();
 
                 if (!error && data) {
                     requestData = data;
@@ -441,8 +441,8 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             }
 
             if (requestData && foundCategory) {
-                pastBidsWithRequests.push({
-                    ...bid,
+            pastBidsWithRequests.push({
+                ...bid,
                     requestDetails: requestData,
                     category: foundCategory
                 });
@@ -530,13 +530,13 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             .from("bids")
             .insert([
                 {
-                    request_id: requestDetails.id,
-                    user_id: businessId,
-                    bid_amount: aiBid.bidAmount,
-                    bid_description: aiBid.bidDescription,
-                    category: bidCategory,
-                    status: "pending",
-                    hidden: null
+            request_id: requestDetails.id,
+            user_id: businessId,
+            bid_amount: aiBid.bidAmount,
+            bid_description: aiBid.bidDescription,
+            category: bidCategory,
+            status: "pending",
+            hidden: null
                 },
             ]);
 

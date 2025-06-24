@@ -644,15 +644,15 @@ app.post('/trigger-autobid', async (req, res) => {
   console.log("🚀 === TRIGGER-AUTOBID ROUTE STARTED ===");
   console.log("📋 Request body:", JSON.stringify(req.body, null, 2));
   
-  const { request_id } = req.body;
+    const { request_id } = req.body;
 
-  if (!request_id) {
+    if (!request_id) {
       console.log("❌ Missing request_id in request body");
-      return res.status(400).json({ error: "Missing required field: request_id." });
-  }
+        return res.status(400).json({ error: "Missing required field: request_id." });
+    }
 
-  try {
-      console.log(`🆕 Auto-bid triggered for Request ID: ${request_id}`);
+    try {
+        console.log(`🆕 Auto-bid triggered for Request ID: ${request_id}`);
 
       // Helper function to determine the correct table name based on category
       const getTableNameForCategory = (category) => {
@@ -685,11 +685,11 @@ app.post('/trigger-autobid', async (req, res) => {
           }
 
           console.log(`🔍 Checking table: ${tableName}`);
-          const { data, error } = await supabase
+            const { data, error } = await supabase
               .from(tableName)
-              .select("*")
-              .eq("id", request_id)
-              .single();
+                .select("*")
+                .eq("id", request_id)
+                .single();
 
           if (error) {
               console.log(`❌ Error querying ${tableName}:`, error.message);
@@ -697,7 +697,7 @@ app.post('/trigger-autobid', async (req, res) => {
               console.log(`✅ Found request in ${tableName}`);
               requestData = data;
               foundCategory = category;
-              break;
+                break;
           } else {
               console.log(`📭 No data found in ${tableName}`);
           }
@@ -800,21 +800,21 @@ app.post('/trigger-autobid', async (req, res) => {
 
       // Find businesses with Auto-Bidding enabled
       console.log("🏢 Fetching businesses with auto-bidding enabled...");
-      const { data: autoBidBusinesses, error: businessError } = await supabase
-          .from("business_profiles")
+        const { data: autoBidBusinesses, error: businessError } = await supabase
+            .from("business_profiles")
           .select("id, autobid_enabled, business_category")
-          .eq("autobid_enabled", true);
+            .eq("autobid_enabled", true);
 
-      if (businessError) {
-          console.error("❌ Error fetching businesses:", businessError.message);
-          return res.status(500).json({ error: "Failed to fetch businesses." });
-      }
+        if (businessError) {
+            console.error("❌ Error fetching businesses:", businessError.message);
+            return res.status(500).json({ error: "Failed to fetch businesses." });
+        }
 
       console.log(`📊 Found ${autoBidBusinesses?.length || 0} businesses with auto-bidding enabled`);
 
       // Filter businesses to only include those whose category matches the request's category
       const eligibleBusinesses = autoBidBusinesses.filter(business => {
-        const businessCategories = Array.isArray(business.business_category) 
+            const businessCategories = Array.isArray(business.business_category) 
           ? business.business_category.map(cat => cat.toLowerCase())
           : [business.business_category?.toLowerCase() || ''];
         const requestCategory = requestDetails.service_category.toLowerCase();
@@ -824,22 +824,22 @@ app.post('/trigger-autobid', async (req, res) => {
         console.log(`🔍 Business ${business.id} categories:`, businessCategories);
         
         return businessCategories.includes(requestCategory);
-      });
+        });
 
-      console.log(`🔍 Found ${eligibleBusinesses.length} eligible businesses for category: ${requestDetails.service_category}`);
+        console.log(`🔍 Found ${eligibleBusinesses.length} eligible businesses for category: ${requestDetails.service_category}`);
       console.log("🏢 Eligible businesses:", JSON.stringify(eligibleBusinesses, null, 2));
 
-      let bidsGenerated = [];
+        let bidsGenerated = [];
 
-      for (const business of eligibleBusinesses) {
+        for (const business of eligibleBusinesses) {
         console.log(`🤖 Generating auto-bid for business: ${business.id}`);
-        const autoBid = await generateAutoBidForBusiness(business.id, requestDetails);
-        if (autoBid) {
-            console.log(`✅ Auto-bid generated for Business ${business.id}:`, autoBid);
-            bidsGenerated.push({
-                business_id: business.id,
-                bid_amount: autoBid.bidAmount,
-                bid_description: autoBid.bidDescription,
+                const autoBid = await generateAutoBidForBusiness(business.id, requestDetails);
+                if (autoBid) {
+                    console.log(`✅ Auto-bid generated for Business ${business.id}:`, autoBid);
+                    bidsGenerated.push({
+                        business_id: business.id,
+                        bid_amount: autoBid.bidAmount,
+                        bid_description: autoBid.bidDescription,
             });
         } else {
             console.log(`❌ Failed to generate auto-bid for Business ${business.id}`);
@@ -852,7 +852,7 @@ app.post('/trigger-autobid', async (req, res) => {
           bids: bidsGenerated,
       });
 
-  } catch (error) {
+            } catch (error) {
       console.error("❌ === TRIGGER-AUTOBID ROUTE FAILED ===");
       console.error("Error details:", error);
       console.error("Error message:", error.message);
@@ -870,11 +870,21 @@ app.post('/api/autobid/generate-sample-bid', async (req, res) => {
   console.log("📋 Request body:", JSON.stringify(req.body, null, 2));
   
   try {
-    const { business_id, category, sample_request } = req.body;
+    const { business_id, category, sample_request, request_data } = req.body;
     
-    if (!business_id || !category || !sample_request) {
+    // Handle both field names for compatibility
+    const actualRequest = sample_request || request_data;
+    
+    if (!business_id || !category || !actualRequest) {
+      console.log("❌ Missing required fields:");
+      console.log("  - business_id:", business_id);
+      console.log("  - category:", category);
+      console.log("  - sample_request:", sample_request);
+      console.log("  - request_data:", request_data);
+      console.log("  - actualRequest:", actualRequest);
+      
       return res.status(400).json({ 
-        error: "Missing required fields: business_id, category, sample_request" 
+        error: "Missing required fields: business_id, category, and either sample_request or request_data" 
       });
     }
 
@@ -885,11 +895,11 @@ app.post('/api/autobid/generate-sample-bid', async (req, res) => {
     console.log(`📊 Retrieved ${trainingData.responses?.length || 0} training responses`);
 
     // 2. Generate AI bid using training data
-    const generatedBid = await generateAIBidForTraining(trainingData, sample_request, category);
+    const generatedBid = await generateAIBidForTraining(trainingData, actualRequest, category);
     console.log("✅ AI bid generated:", generatedBid);
 
     // 3. Store AI bid in database
-    const aiResponse = await storeAIBid(business_id, sample_request.id, generatedBid, category);
+    const aiResponse = await storeAIBid(business_id, actualRequest.id || 'sample-request', generatedBid, category);
     console.log("💾 AI bid stored with ID:", aiResponse.id);
 
     res.json({
@@ -905,6 +915,13 @@ app.post('/api/autobid/generate-sample-bid', async (req, res) => {
   }
 });
 
+// Frontend should call this endpoint with:
+// {
+//   "business_id": "user-id",
+//   "category": "photography", 
+//   "request_data": { ... }  // or "sample_request": { ... }
+// }
+
 // 2. Training Data Retrieval Endpoint
 app.get('/api/autobid/training-data/:business_id/:category', async (req, res) => {
   console.log("📊 === TRAINING DATA RETRIEVAL ROUTE STARTED ===");
@@ -919,9 +936,9 @@ app.get('/api/autobid/training-data/:business_id/:category', async (req, res) =>
       success: true,
       business_responses: trainingData.responses || [],
       feedback_data: trainingData.feedback || []
-    });
+        });
 
-  } catch (error) {
+    } catch (error) {
     console.error("❌ Error retrieving training data:", error);
     res.status(500).json({ error: error.message });
   }
@@ -1000,24 +1017,48 @@ app.post('/api/autobid/training-feedback', async (req, res) => {
   console.log("📋 Request body:", JSON.stringify(req.body, null, 2));
   
   try {
-    const { business_id, training_response_id, feedback_type, feedback_text, specific_issues, suggested_improvements } = req.body;
+    const { 
+      business_id, 
+      training_response_id, 
+      feedback_type, 
+      feedback_text, 
+      specific_issues, 
+      suggested_improvements,
+      // Handle frontend field names
+      category,
+      sample_bid_id,
+      approved,
+      feedback,
+      suggested_changes
+    } = req.body;
 
-    if (!business_id || !training_response_id || !feedback_type) {
+    // Use the correct field names
+    const actualBusinessId = business_id;
+    const actualTrainingResponseId = training_response_id || sample_bid_id;
+    const actualFeedbackType = feedback_type || (approved ? 'approved' : 'rejected');
+    const actualFeedbackText = feedback_text || feedback || (approved ? 'Approved' : 'Needs adjustment');
+
+    if (!actualBusinessId || !actualTrainingResponseId || !actualFeedbackType) {
+      console.log("❌ Missing required fields:");
+      console.log("  - business_id:", actualBusinessId);
+      console.log("  - training_response_id:", actualTrainingResponseId);
+      console.log("  - feedback_type:", actualFeedbackType);
+      
       return res.status(400).json({ 
-        error: "Missing required fields: business_id, training_response_id, feedback_type" 
+        error: "Missing required fields: business_id, training_response_id (or sample_bid_id), and feedback_type (or approved)" 
       });
     }
 
     // Store feedback
-    const { data: feedback, error: feedbackError } = await supabase
+    const { data: feedbackData, error: feedbackError } = await supabase
       .from('autobid_training_feedback')
       .insert({
-        business_id,
-        training_response_id,
-        feedback_type,
-        feedback_text,
-        specific_issues,
-        suggested_improvements
+        business_id: actualBusinessId,
+        training_response_id: actualTrainingResponseId,
+        feedback_type: actualFeedbackType,
+        feedback_text: actualFeedbackText,
+        specific_issues: specific_issues || (actualFeedbackType === 'rejected' ? { general: 'needs_adjustment' } : null),
+        suggested_improvements: suggested_improvements || suggested_changes
       })
       .select()
       .single();
@@ -1028,15 +1069,15 @@ app.post('/api/autobid/training-feedback', async (req, res) => {
     }
 
     // Update training progress based on feedback
-    if (feedback_type === 'approved') {
-      await updateTrainingProgress(business_id, training_response_id);
+    if (actualFeedbackType === 'approved') {
+      await updateTrainingProgress(actualBusinessId, actualTrainingResponseId);
     }
 
-    console.log("✅ Feedback stored successfully:", feedback.id);
+    console.log("✅ Feedback stored successfully:", feedbackData.id);
 
     res.json({
       success: true,
-      feedback_id: feedback.id
+      feedback_id: feedbackData.id
     });
 
   } catch (error) {
