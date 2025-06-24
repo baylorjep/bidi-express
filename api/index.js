@@ -666,72 +666,8 @@ app.post('/trigger-autobid', async (req, res) => {
           return categoryMap[normalizedCategory] || null;
       };
 
-      // Helper function to get standardized request details from any category table
-      const getStandardizedRequestDetails = (requestData, category) => {
-          const baseDetails = {
-              id: requestData.id,
-              service_category: category,
-              location: requestData.location || 'Unknown',
-              start_date: requestData.start_date || requestData.service_date || 'Unknown',
-              end_date: requestData.end_date || 'Unknown',
-              additional_comments: requestData.additional_comments || requestData.special_requests || 'No additional comments'
-          };
-
-          // Category-specific field mappings
-          switch (category.toLowerCase()) {
-              case 'catering':
-                  return {
-                      ...baseDetails,
-                      service_title: requestData.title || 'Catering Service',
-                      service_description: `Event Type: ${requestData.event_type || 'Unknown'}, Guests: ${requestData.estimated_guests || 'Unknown'}, Food Preferences: ${JSON.stringify(requestData.food_preferences || {})}, Budget: ${requestData.budget_range || 'Not specified'}`
-                  };
-              case 'dj':
-                  return {
-                      ...baseDetails,
-                      service_title: requestData.title || 'DJ Service',
-                      service_description: `Event Type: ${requestData.event_type || 'Unknown'}, Duration: ${requestData.event_duration || 'Unknown'} hours, Guests: ${requestData.estimated_guests || 'Unknown'}, Music Preferences: ${JSON.stringify(requestData.music_preferences || {})}, Budget: ${requestData.budget_range || 'Not specified'}`
-                  };
-              case 'beauty':
-                  return {
-                      ...baseDetails,
-                      service_title: requestData.event_title || 'Beauty Service',
-                      service_description: `Event Type: ${requestData.event_type || 'Unknown'}, Service Type: ${requestData.service_type || 'Unknown'}, Number of People: ${requestData.num_people || 'Unknown'}, Price Range: ${requestData.price_range || 'Not specified'}`
-                  };
-              case 'florist':
-                  return {
-                      ...baseDetails,
-                      service_title: requestData.event_title || 'Florist Service',
-                      service_description: `Event Type: ${requestData.event_type || 'Unknown'}, Floral Arrangements: ${JSON.stringify(requestData.floral_arrangements || {})}, Flower Preferences: ${JSON.stringify(requestData.flower_preferences || {})}, Price Range: ${requestData.price_range || 'Not specified'}`
-                  };
-              case 'wedding_planning':
-                  return {
-                      ...baseDetails,
-                      service_title: requestData.event_title || 'Wedding Planning Service',
-                      service_description: `Event Type: ${requestData.event_type || 'Unknown'}, Guest Count: ${requestData.guest_count || 'Unknown'}, Planning Level: ${requestData.planning_level || 'Unknown'}, Budget Range: ${requestData.budget_range || 'Not specified'}`
-                  };
-              case 'videography':
-                  return {
-                      ...baseDetails,
-                      service_title: requestData.event_title || 'Videography Service',
-                      service_description: `Event Type: ${requestData.event_type || 'Unknown'}, Duration: ${requestData.duration || 'Unknown'} hours, Number of People: ${requestData.num_people || 'Unknown'}, Style Preferences: ${JSON.stringify(requestData.style_preferences || {})}, Price Range: ${requestData.price_range || 'Not specified'}`
-                  };
-              case 'photography':
-                  return {
-                      ...baseDetails,
-                      service_title: requestData.event_title || 'Photography Service',
-                      service_description: `Event Type: ${requestData.event_type || 'Unknown'}, Duration: ${requestData.duration || 'Unknown'} hours, Number of People: ${requestData.num_people || 'Unknown'}, Style Preferences: ${JSON.stringify(requestData.style_preferences || {})}, Price Range: ${requestData.price_range || 'Not specified'}`
-                  };
-              default:
-                  return {
-                      ...baseDetails,
-                      service_title: 'Unknown Service',
-                      service_description: 'Service details not available'
-                  };
-          }
-      };
-
       // Fetch request details from the appropriate category table
-      let requestDetails = null;
+      let requestData = null;
       let foundCategory = null;
 
       const categories = ['catering', 'dj', 'beauty', 'florist', 'wedding_planning', 'videography', 'photography'];
@@ -747,18 +683,103 @@ app.post('/trigger-autobid', async (req, res) => {
               .single();
 
           if (!error && data) {
-              requestDetails = getStandardizedRequestDetails(data, category);
+              requestData = data;
               foundCategory = category;
               break;
           }
       }
 
-      if (!requestDetails || !foundCategory) {
+      if (!requestData || !foundCategory) {
           console.error(`❌ Request not found in any category table for ID: ${request_id}`);
           return res.status(404).json({ error: "Request not found." });
       }
 
-      console.log(`🔍 Retrieved request details from ${foundCategory} table:`, requestDetails);
+      console.log(`🔍 Retrieved request details from ${foundCategory} table:`, requestData);
+
+      // Create standardized request details for the generateAutoBidForBusiness function
+      const requestDetails = {
+          id: requestData.id,
+          service_category: foundCategory,
+          location: requestData.location || 'Unknown',
+          start_date: requestData.start_date || requestData.service_date || 'Unknown',
+          end_date: requestData.end_date || 'Unknown',
+          additional_comments: requestData.additional_comments || requestData.special_requests || 'No additional comments',
+          // Add category-specific fields based on the category
+          ...(foundCategory === 'catering' && {
+              title: requestData.title,
+              event_type: requestData.event_type,
+              estimated_guests: requestData.estimated_guests,
+              food_preferences: requestData.food_preferences,
+              budget_range: requestData.budget_range,
+              equipment_needed: requestData.equipment_needed,
+              setup_cleanup: requestData.setup_cleanup,
+              food_service_type: requestData.food_service_type,
+              serving_staff: requestData.serving_staff,
+              dietary_restrictions: requestData.dietary_restrictions
+          }),
+          ...(foundCategory === 'dj' && {
+              title: requestData.title,
+              event_type: requestData.event_type,
+              event_duration: requestData.event_duration,
+              estimated_guests: requestData.estimated_guests,
+              music_preferences: requestData.music_preferences,
+              budget_range: requestData.budget_range,
+              equipment_needed: requestData.equipment_needed,
+              additional_services: requestData.additional_services,
+              special_requests: requestData.special_requests
+          }),
+          ...(foundCategory === 'beauty' && {
+              event_title: requestData.event_title,
+              event_type: requestData.event_type,
+              service_type: requestData.service_type,
+              num_people: requestData.num_people,
+              price_range: requestData.price_range,
+              hairstyle_preferences: requestData.hairstyle_preferences,
+              makeup_style_preferences: requestData.makeup_style_preferences,
+              trial_session_hair: requestData.trial_session_hair,
+              trial_session_makeup: requestData.trial_session_makeup,
+              on_site_service_needed: requestData.on_site_service_needed
+          }),
+          ...(foundCategory === 'florist' && {
+              event_title: requestData.event_title,
+              event_type: requestData.event_type,
+              price_range: requestData.price_range,
+              flower_preferences: requestData.flower_preferences,
+              floral_arrangements: requestData.floral_arrangements,
+              additional_services: requestData.additional_services,
+              colors: requestData.colors
+          }),
+          ...(foundCategory === 'wedding_planning' && {
+              event_title: requestData.event_title,
+              event_type: requestData.event_type,
+              guest_count: requestData.guest_count,
+              planning_level: requestData.planning_level,
+              experience_level: requestData.experience_level,
+              budget_range: requestData.budget_range,
+              planner_budget: requestData.planner_budget,
+              communication_style: requestData.communication_style
+          }),
+          ...(foundCategory === 'videography' && {
+              event_title: requestData.event_title,
+              event_type: requestData.event_type,
+              duration: requestData.duration,
+              num_people: requestData.num_people,
+              style_preferences: requestData.style_preferences,
+              deliverables: requestData.deliverables,
+              coverage: requestData.coverage,
+              price_range: requestData.price_range
+          }),
+          ...(foundCategory === 'photography' && {
+              event_title: requestData.event_title,
+              event_type: requestData.event_type,
+              duration: requestData.duration,
+              num_people: requestData.num_people,
+              style_preferences: requestData.style_preferences,
+              deliverables: requestData.deliverables,
+              coverage: requestData.coverage,
+              price_range: requestData.price_range
+          })
+      };
 
       // Find businesses with Auto-Bidding enabled
       const { data: autoBidBusinesses, error: businessError } = await supabase
