@@ -104,7 +104,7 @@ app.get('/api/business-profiles/:id', async (req, res) => {
 });
 
 // basic page
-app.get("/", (req, res) => res.send("Bidi Express on Vercel"));
+app.get("/", (req, res) => res.send("Bidi Express is Running!"));
 
 // Test endpoint for CORS
 app.get("/api/test", (req, res) => {
@@ -641,9 +641,13 @@ app.post("/send-message", async (req, res) => {
 
 // Autobidding API
 app.post('/trigger-autobid', async (req, res) => {
+  console.log("🚀 === TRIGGER-AUTOBID ROUTE STARTED ===");
+  console.log("📋 Request body:", JSON.stringify(req.body, null, 2));
+  
   const { request_id } = req.body;
 
   if (!request_id) {
+      console.log("❌ Missing request_id in request body");
       return res.status(400).json({ error: "Missing required field: request_id." });
   }
 
@@ -667,6 +671,7 @@ app.post('/trigger-autobid', async (req, res) => {
       };
 
       // Fetch request details from the appropriate category table
+      console.log("🔍 Searching for request in category tables...");
       let requestData = null;
       let foundCategory = null;
 
@@ -674,18 +679,27 @@ app.post('/trigger-autobid', async (req, res) => {
       
       for (const category of categories) {
           const tableName = getTableNameForCategory(category);
-          if (!tableName) continue;
+          if (!tableName) {
+              console.log(`⚠️ No table mapping found for category: ${category}`);
+              continue;
+          }
 
+          console.log(`🔍 Checking table: ${tableName}`);
           const { data, error } = await supabase
               .from(tableName)
               .select("*")
               .eq("id", request_id)
               .single();
 
-          if (!error && data) {
+          if (error) {
+              console.log(`❌ Error querying ${tableName}:`, error.message);
+          } else if (data) {
+              console.log(`✅ Found request in ${tableName}`);
               requestData = data;
               foundCategory = category;
               break;
+          } else {
+              console.log(`📭 No data found in ${tableName}`);
           }
       }
 
@@ -694,9 +708,10 @@ app.post('/trigger-autobid', async (req, res) => {
           return res.status(404).json({ error: "Request not found." });
       }
 
-      console.log(`🔍 Retrieved request details from ${foundCategory} table:`, requestData);
+      console.log(`🔍 Retrieved request details from ${foundCategory} table:`, JSON.stringify(requestData, null, 2));
 
       // Create standardized request details for the generateAutoBidForBusiness function
+      console.log("📝 Creating standardized request details...");
       const requestDetails = {
           id: requestData.id,
           service_category: foundCategory,
@@ -781,7 +796,10 @@ app.post('/trigger-autobid', async (req, res) => {
           })
       };
 
+      console.log("📋 Standardized request details:", JSON.stringify(requestDetails, null, 2));
+
       // Find businesses with Auto-Bidding enabled
+      console.log("🏢 Fetching businesses with auto-bidding enabled...");
       const { data: autoBidBusinesses, error: businessError } = await supabase
           .from("business_profiles")
           .select("id, autobid_enabled, business_category")
@@ -792,34 +810,45 @@ app.post('/trigger-autobid', async (req, res) => {
           return res.status(500).json({ error: "Failed to fetch businesses." });
       }
 
+      console.log(`📊 Found ${autoBidBusinesses?.length || 0} businesses with auto-bidding enabled`);
+
       // Filter businesses to only include those whose category matches the request's category
       const eligibleBusinesses = autoBidBusinesses.filter(business =>
         business.business_category.toLowerCase() === requestDetails.service_category.toLowerCase()
       );
 
       console.log(`🔍 Found ${eligibleBusinesses.length} eligible businesses for category: ${requestDetails.service_category}`);
+      console.log("🏢 Eligible businesses:", JSON.stringify(eligibleBusinesses, null, 2));
 
       let bidsGenerated = [];
 
       for (const business of eligibleBusinesses) {
+        console.log(`🤖 Generating auto-bid for business: ${business.id}`);
         const autoBid = await generateAutoBidForBusiness(business.id, requestDetails);
         if (autoBid) {
-            console.log(` Auto-bid generated for Business ${business.id}:`, autoBid);
+            console.log(`✅ Auto-bid generated for Business ${business.id}:`, autoBid);
             bidsGenerated.push({
                 business_id: business.id,
                 bid_amount: autoBid.bidAmount,
                 bid_description: autoBid.bidDescription,
             });
+        } else {
+            console.log(`❌ Failed to generate auto-bid for Business ${business.id}`);
         }
       }
 
+      console.log("✅ === TRIGGER-AUTOBID ROUTE COMPLETED SUCCESSFULLY ===");
       res.status(200).json({
           message: "Auto-bids generated successfully (LOG ONLY, NO INSERTION)",
           bids: bidsGenerated,
       });
 
   } catch (error) {
-      console.error("❌ Error triggering auto-bid:", error.message);
+      console.error("❌ === TRIGGER-AUTOBID ROUTE FAILED ===");
+      console.error("Error details:", error);
+      console.error("Error message:", error.message);
+      console.error("Error stack:", error.stack);
+      console.error("=== END ERROR LOG ===");
       res.status(500).json({ error: "Failed to trigger auto-bid.", details: error.message });
   }
 });
