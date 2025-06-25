@@ -20,6 +20,10 @@ const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY,
   }
 );
 
+// Initialize OpenAI for training functions
+const OpenAI = require("openai");
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
 const app = express();
 
 // Trust proxy - needed for proper rate limiting behind Vercel
@@ -905,7 +909,11 @@ app.post('/api/autobid/generate-sample-bid', async (req, res) => {
     res.json({
       success: true,
       generated_bid: generatedBid,
-      response_id: aiResponse.id
+      response_id: aiResponse.id,
+      amount: generatedBid.amount,
+      description: generatedBid.description,
+      breakdown: generatedBid.breakdown,
+      reasoning: generatedBid.reasoning
     });
 
   } catch (error) {
@@ -1092,6 +1100,12 @@ async function getBusinessTrainingData(businessId, category) {
   console.log(`🔍 Fetching training data for Business ${businessId}, Category: ${category}`);
 
   // Fetch business responses for this category
+  console.log(`📊 Querying autobid_training_responses with filters:`);
+  console.log(`  - business_id: ${businessId}`);
+  console.log(`  - category: ${category}`);
+  console.log(`  - is_training: true`);
+  console.log(`  - is_ai_generated: false`);
+
   const { data: responses, error: responsesError } = await supabase
     .from('autobid_training_responses')
     .select(`
@@ -1107,6 +1121,20 @@ async function getBusinessTrainingData(businessId, category) {
   if (responsesError) {
     console.error("❌ Error fetching training responses:", responsesError);
     throw new Error(`Failed to fetch training responses: ${responsesError.message}`);
+  }
+
+  console.log(`📊 Raw responses data:`, responses);
+  console.log(`📊 Number of responses found: ${responses?.length || 0}`);
+
+  // Let's also check what's in the database without filters
+  const { data: allResponses, error: allError } = await supabase
+    .from('autobid_training_responses')
+    .select('business_id, category, is_training, is_ai_generated, bid_amount')
+    .eq('business_id', businessId);
+
+  if (!allError) {
+    console.log(`📊 All responses for this business:`, allResponses);
+    console.log(`📊 Categories found:`, [...new Set(allResponses.map(r => r.category))]);
   }
 
   // Fetch feedback data
