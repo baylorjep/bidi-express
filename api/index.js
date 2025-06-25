@@ -867,6 +867,37 @@ app.post('/trigger-autobid', async (req, res) => {
   }
 });
 
+// Add request deduplication tracking
+const recentRequests = new Map();
+
+// Helper function to create request key
+function createRequestKey(businessId, category, requestData) {
+  const key = `${businessId}-${category}-${JSON.stringify(requestData)}`;
+  return key;
+}
+
+// Helper function to check if request is duplicate
+function isDuplicateRequest(businessId, category, requestData) {
+  const key = createRequestKey(businessId, category, requestData);
+  const now = Date.now();
+  const recentRequest = recentRequests.get(key);
+  
+  if (recentRequest && (now - recentRequest) < 5000) { // 5 second window
+    return true;
+  }
+  
+  recentRequests.set(key, now);
+  
+  // Clean up old entries (older than 1 minute)
+  for (const [k, v] of recentRequests.entries()) {
+    if (now - v > 60000) {
+      recentRequests.delete(k);
+    }
+  }
+  
+  return false;
+}
+
 // ==================== AUTOBID TRAINING SYSTEM ====================
 
 // 1. AI Bid Generation Endpoint for Training
@@ -893,6 +924,14 @@ app.post('/api/autobid/generate-sample-bid', async (req, res) => {
       });
     }
 
+    // Check for duplicate requests
+    if (isDuplicateRequest(business_id, category, actualRequest)) {
+      console.log("⚠️ Duplicate request detected, returning cached response");
+      return res.status(429).json({ 
+        error: "Duplicate request detected. Please wait a moment before trying again." 
+      });
+    }
+
     console.log(`🤖 Generating AI sample bid for Business ${business_id}, Category: ${category}`);
 
     // 1. Fetch business training data
@@ -906,41 +945,35 @@ app.post('/api/autobid/generate-sample-bid', async (req, res) => {
     // 3. Store AI bid in database
     // Get a random existing training request for this category to avoid always using the same one
     let requestId = actualRequest.id;
-    if (!requestId || requestId === crypto.randomUUID()) {
-      // Find a random existing training request for this category
-      console.log(`🔍 Looking for training requests with category: ${category}`);
-      
-      const { data: existingRequests, error: existingError } = await supabase
+    
+    // If no request_id provided, get a random training request for this category
+    if (!requestId) {
+      console.log("🔍 Looking for training requests with category:", category);
+      const { data: trainingRequests, error: trainingError } = await supabase
         .from('autobid_training_requests')
-        .select('id, category, is_active, created_at')
-        .eq('category', category)
-        .eq('is_active', true)
-        .order('created_at', { ascending: true });
+        .select('id')
+        .eq('category', category);
 
-      if (existingError) {
-        console.error("❌ Error fetching training requests:", existingError);
-        
-        // Let's try a broader query to see what's in the table
-        const { data: allRequests, error: allError } = await supabase
-          .from('autobid_training_requests')
-          .select('id, category, is_active')
-          .limit(10);
-          
-        if (allError) {
-          console.error("❌ Error fetching all requests:", allError);
-        } else {
-          console.log("📊 All training requests in table:", allRequests);
-        }
-        
-        throw new Error(`No training requests available for ${category} category`);
-      } else if (!existingRequests || existingRequests.length === 0) {
-        throw new Error(`No training requests available for ${category} category`);
-      } else {
-        // Pick a random request from the available ones
-        const randomIndex = Math.floor(Math.random() * existingRequests.length);
-        requestId = existingRequests[randomIndex].id;
-        console.log(`✅ Using random training request with ID: ${requestId} (${randomIndex + 1}/${existingRequests.length})`);
+      if (trainingError) {
+        console.error("❌ Error fetching training requests:", trainingError);
+        return res.status(500).json({ error: "Failed to fetch training requests" });
       }
+
+      if (!trainingRequests || trainingRequests.length === 0) {
+        console.log("❌ No training requests available for category:", category);
+        return res.status(404).json({ error: "No training requests available for this category" });
+      }
+
+      // Use a deterministic selection based on request data hash to ensure consistency
+      const requestHash = JSON.stringify(actualRequest);
+      const hashValue = requestHash.split('').reduce((a, b) => {
+        a = ((a << 5) - a) + b.charCodeAt(0);
+        return a & a;
+      }, 0);
+      const selectedIndex = Math.abs(hashValue) % trainingRequests.length;
+      requestId = trainingRequests[selectedIndex].id;
+      
+      console.log(`✅ Using deterministic training request with ID: ${requestId} (${selectedIndex + 1}/${trainingRequests.length})`);
     }
 
     const aiResponse = await storeAIBid(business_id, requestId, generatedBid, category);
@@ -1094,6 +1127,26 @@ app.post('/api/autobid/training-feedback', async (req, res) => {
       
       return res.status(400).json({ 
         error: "Missing required fields: business_id, training_response_id (or sample_bid_id), and feedback_type (or approved)" 
+      });
+    }
+
+    // Check for existing feedback to prevent duplicates
+    const { data: existingFeedback, error: checkError } = await supabase
+      .from('autobid_training_feedback')
+      .select('id')
+      .eq('business_id', actualBusinessId)
+      .eq('training_response_id', actualTrainingResponseId)
+      .maybeSingle();
+
+    if (checkError) {
+      console.error("❌ Error checking existing feedback:", checkError);
+      return res.status(500).json({ error: "Failed to check existing feedback" });
+    }
+
+    if (existingFeedback) {
+      console.log("⚠️ Feedback already exists for this training response, skipping duplicate");
+      return res.status(409).json({ 
+        error: "Feedback already submitted for this training response" 
       });
     }
 
@@ -1588,7 +1641,7 @@ function createTrainingAIPrompt(processedData, sampleRequest, category) {
   }
   
   // Add some randomness to avoid always getting the same price
-  const variation = 0.9 + (Math.random() * 0.2); // ±10% variation
+  const variation = 0.95 + (Math.random() * 0.1); // ±5% variation instead of ±10%
   basePrice = Math.round(basePrice * variation);
 
   return `
