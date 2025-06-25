@@ -904,23 +904,21 @@ app.post('/api/autobid/generate-sample-bid', async (req, res) => {
     console.log("✅ AI bid generated:", generatedBid);
 
     // 3. Store AI bid in database
-    // Get an existing training request for this category
+    // Get a random existing training request for this category to avoid always using the same one
     let requestId = actualRequest.id;
     if (!requestId || requestId === crypto.randomUUID()) {
-      // Find an existing training request for this category
+      // Find a random existing training request for this category
       console.log(`🔍 Looking for training requests with category: ${category}`);
       
-      const { data: existingRequest, error: existingError } = await supabase
+      const { data: existingRequests, error: existingError } = await supabase
         .from('autobid_training_requests')
         .select('id, category, is_active, created_at')
         .eq('category', category)
         .eq('is_active', true)
-        .order('created_at', { ascending: true })
-        .limit(1)
-        .single();
+        .order('created_at', { ascending: true });
 
       if (existingError) {
-        console.error("❌ Error fetching training request:", existingError);
+        console.error("❌ Error fetching training requests:", existingError);
         
         // Let's try a broader query to see what's in the table
         const { data: allRequests, error: allError } = await supabase
@@ -935,9 +933,13 @@ app.post('/api/autobid/generate-sample-bid', async (req, res) => {
         }
         
         throw new Error(`No training requests available for ${category} category`);
+      } else if (!existingRequests || existingRequests.length === 0) {
+        throw new Error(`No training requests available for ${category} category`);
       } else {
-        requestId = existingRequest.id;
-        console.log("✅ Using existing training request with ID:", requestId);
+        // Pick a random request from the available ones
+        const randomIndex = Math.floor(Math.random() * existingRequests.length);
+        requestId = existingRequests[randomIndex].id;
+        console.log(`✅ Using random training request with ID: ${requestId} (${randomIndex + 1}/${existingRequests.length})`);
       }
     }
 
@@ -1379,7 +1381,8 @@ function processTrainingDataForAI(trainingData) {
     business_patterns: analyzeBusinessPatterns(trainingData.responses),
     pricing_strategy: extractPricingStrategy(trainingData.responses),
     feedback_preferences: analyzeFeedbackPreferences(trainingData.feedback),
-    service_preferences: extractServicePreferences(trainingData.responses)
+    service_preferences: extractServicePreferences(trainingData.responses),
+    responses: trainingData.responses // Include raw responses for bid range calculation
   };
 
   console.log("📊 Processed data:", processedData);
@@ -1563,11 +1566,37 @@ function createTrainingAIPrompt(processedData, sampleRequest, category) {
 
   const categoryInfo = categoryHandlers[category] || categoryHandlers.photography;
 
+  // Calculate a more dynamic base price based on the specific request
+  let basePrice = processedData.business_patterns.average_bid_amount;
+  const requestDuration = sampleRequest.duration;
+  const guestCount = sampleRequest.guest_count || 1;
+  const eventType = sampleRequest.event_type;
+  
+  // Adjust pricing based on request specifics
+  if (requestDuration) {
+    const hours = parseInt(requestDuration.match(/(\d+)/)?.[1] || 1);
+    if (hours > 1) {
+      basePrice = basePrice * (hours / 3); // Normalize to 3-hour baseline
+    }
+  }
+  
+  // Adjust for event type complexity
+  if (eventType === 'wedding') {
+    basePrice = basePrice * 1.5; // Weddings are more complex
+  } else if (eventType === 'engagement') {
+    basePrice = basePrice * 0.8; // Engagements are simpler
+  }
+  
+  // Add some randomness to avoid always getting the same price
+  const variation = 0.9 + (Math.random() * 0.2); // ±10% variation
+  basePrice = Math.round(basePrice * variation);
+
   return `
 You are an AI assistant that generates personalized bids for ${category} services based on a business's training data.
 
 ### BUSINESS TRAINING PATTERNS:
-- **Average Bid Amount:** $${processedData.business_patterns.average_bid_amount.toFixed(2)}
+- **Training Bid Range:** $${Math.min(...processedData.responses?.map(r => r.bid_amount) || [0])} - $${Math.max(...processedData.responses?.map(r => r.bid_amount) || [0])}
+- **Average Training Bid:** $${processedData.business_patterns.average_bid_amount.toFixed(2)}
 - **Pricing Strategy:** ${Object.entries(processedData.pricing_strategy).filter(([k,v]) => v).map(([k,v]) => k.replace('_', ' ')).join(', ')}
 - **Service Emphasis:** ${processedData.service_preferences.join(', ')}
 - **Description Style:** ${processedData.business_patterns.description_style}
@@ -1577,8 +1606,13 @@ You are an AI assistant that generates personalized bids for ${category} service
 - **Approval Rate:** ${(processedData.feedback_preferences.approval_rate * 100).toFixed(1)}%
 - **Common Issues to Avoid:** ${processedData.feedback_preferences.common_issues.join(', ')}
 
-### SAMPLE REQUEST:
-${JSON.stringify(sampleRequest, null, 2)}
+### SPECIFIC REQUEST ANALYSIS:
+- **Duration:** ${sampleRequest.duration}
+- **Event Type:** ${sampleRequest.event_type}
+- **Guest Count:** ${sampleRequest.guest_count}
+- **Location:** ${sampleRequest.location}
+- **Requirements:** ${sampleRequest.requirements?.join(', ')}
+- **Suggested Base Price Range:** $${Math.round(basePrice * 0.8)} - $${Math.round(basePrice * 1.2)}
 
 ### CATEGORY-SPECIFIC FACTORS:
 - **Pricing Factors:** ${categoryInfo.pricingFactors}
@@ -1586,15 +1620,22 @@ ${JSON.stringify(sampleRequest, null, 2)}
 
 ### INSTRUCTIONS:
 Generate a bid that matches this business's style and pricing patterns. Consider:
-1. Their average bid amount and pricing strategy
-2. Their preferred service emphasis and description style
-3. Common issues they've identified in previous feedback
-4. The specific requirements of this sample request
+1. The specific request details (duration, event type, guest count, location)
+2. Their training bid range and pricing strategy
+3. Their preferred service emphasis and description style
+4. Common issues they've identified in previous feedback
+5. The requirements of this specific request
+
+IMPORTANT: Do NOT always use the average training amount. Instead:
+- Calculate a price based on the specific request details
+- Consider duration, complexity, and requirements
+- Stay within the business's training bid range
+- Add appropriate variation based on the request specifics
 
 ### RETURN JSON FORMAT ONLY:
 \`\`\`json
 {
-  "bidAmount": <calculated bid amount>,
+  "bidAmount": <calculated bid amount based on request specifics>,
   "bidDescription": "<detailed bid description matching business style>",
   "pricingBreakdown": "<detailed pricing breakdown>",
   "pricingReasoning": "<explanation of pricing strategy>"
