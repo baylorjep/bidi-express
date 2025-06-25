@@ -904,27 +904,25 @@ app.post('/api/autobid/generate-sample-bid', async (req, res) => {
     console.log("✅ AI bid generated:", generatedBid);
 
     // 3. Store AI bid in database
-    // First, let's create a dummy training request if we don't have a valid request_id
+    // Get an existing training request for this category
     let requestId = actualRequest.id;
     if (!requestId || requestId === crypto.randomUUID()) {
-      // Create a dummy training request record
-      const { data: dummyRequest, error: dummyError } = await supabase
+      // Find an existing training request for this category
+      const { data: existingRequest, error: existingError } = await supabase
         .from('autobid_training_requests')
-        .insert({
-          request_data: actualRequest,
-          category: category,
-          is_active: true
-        })
         .select('id')
+        .eq('category', category)
+        .eq('is_active', true)
+        .order('created_at', { ascending: true })
+        .limit(1)
         .single();
 
-      if (dummyError) {
-        console.error("❌ Error creating dummy training request:", dummyError);
-        // Use a fallback approach - store without request_id
-        requestId = null;
+      if (existingError || !existingRequest) {
+        console.error("❌ No training requests found for category:", category);
+        throw new Error(`No training requests available for ${category} category`);
       } else {
-        requestId = dummyRequest.id;
-        console.log("✅ Created dummy training request with ID:", requestId);
+        requestId = existingRequest.id;
+        console.log("✅ Using existing training request with ID:", requestId);
       }
     }
 
@@ -939,9 +937,9 @@ app.post('/api/autobid/generate-sample-bid', async (req, res) => {
       description: generatedBid.description,
       breakdown: generatedBid.breakdown,
       reasoning: generatedBid.reasoning
-    });
+        });
 
-  } catch (error) {
+    } catch (error) {
     console.error("❌ === GENERATE SAMPLE BID ROUTE FAILED ===");
     console.error("Error details:", error);
     res.status(500).json({ error: error.message });
