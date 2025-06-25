@@ -908,17 +908,32 @@ app.post('/api/autobid/generate-sample-bid', async (req, res) => {
     let requestId = actualRequest.id;
     if (!requestId || requestId === crypto.randomUUID()) {
       // Find an existing training request for this category
+      console.log(`🔍 Looking for training requests with category: ${category}`);
+      
       const { data: existingRequest, error: existingError } = await supabase
         .from('autobid_training_requests')
-        .select('id')
+        .select('id, category, is_active, created_at')
         .eq('category', category)
         .eq('is_active', true)
         .order('created_at', { ascending: true })
         .limit(1)
         .single();
 
-      if (existingError || !existingRequest) {
-        console.error("❌ No training requests found for category:", category);
+      if (existingError) {
+        console.error("❌ Error fetching training request:", existingError);
+        
+        // Let's try a broader query to see what's in the table
+        const { data: allRequests, error: allError } = await supabase
+          .from('autobid_training_requests')
+          .select('id, category, is_active')
+          .limit(10);
+          
+        if (allError) {
+          console.error("❌ Error fetching all requests:", allError);
+        } else {
+          console.log("📊 All training requests in table:", allRequests);
+        }
+        
         throw new Error(`No training requests available for ${category} category`);
       } else {
         requestId = existingRequest.id;
@@ -1314,14 +1329,37 @@ async function updateTrainingProgress(businessId, trainingResponseId) {
 
   if (progressFetchError) {
     console.error("❌ Error fetching current progress:", progressFetchError);
+    
+    // If no record exists, create one
+    if (progressFetchError.code === 'PGRST116') {
+      console.log("📝 Creating new training progress record");
+      const { error: insertError } = await supabase
+        .from('autobid_training_progress')
+        .insert({
+          business_id: businessId,
+          category: response.category,
+          consecutive_approvals: 1,
+          total_scenarios_completed: 1,
+          training_completed: false,
+          last_training_date: new Date().toISOString()
+        });
+
+      if (insertError) {
+        console.error("❌ Error creating training progress record:", insertError);
+      } else {
+        console.log("✅ New training progress record created");
+      }
+      return;
+    }
     return;
   }
 
-  // Update progress
+  // Update existing progress
   const { error: progressError } = await supabase
     .from('autobid_training_progress')
     .update({
       consecutive_approvals: (currentProgress?.consecutive_approvals || 0) + 1,
+      total_scenarios_completed: (currentProgress?.total_scenarios_completed || 0) + 1,
       last_training_date: new Date().toISOString()
     })
     .eq('business_id', businessId)
