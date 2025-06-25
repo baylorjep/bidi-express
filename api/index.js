@@ -904,7 +904,31 @@ app.post('/api/autobid/generate-sample-bid', async (req, res) => {
     console.log("✅ AI bid generated:", generatedBid);
 
     // 3. Store AI bid in database
-    const aiResponse = await storeAIBid(business_id, actualRequest.id || crypto.randomUUID(), generatedBid, category);
+    // First, let's create a dummy training request if we don't have a valid request_id
+    let requestId = actualRequest.id;
+    if (!requestId || requestId === crypto.randomUUID()) {
+      // Create a dummy training request record
+      const { data: dummyRequest, error: dummyError } = await supabase
+        .from('autobid_training_requests')
+        .insert({
+          request_data: actualRequest,
+          category: category,
+          is_active: true
+        })
+        .select('id')
+        .single();
+
+      if (dummyError) {
+        console.error("❌ Error creating dummy training request:", dummyError);
+        // Use a fallback approach - store without request_id
+        requestId = null;
+      } else {
+        requestId = dummyRequest.id;
+        console.log("✅ Created dummy training request with ID:", requestId);
+      }
+    }
+
+    const aiResponse = await storeAIBid(business_id, requestId, generatedBid, category);
     console.log("💾 AI bid stored with ID:", aiResponse.id);
 
     res.json({
@@ -1237,19 +1261,25 @@ async function generateAIBidForTraining(trainingData, sampleRequest, category) {
 async function storeAIBid(businessId, requestId, generatedBid, category) {
   console.log(`💾 Storing AI bid for Business ${businessId}`);
 
+  const insertData = {
+    business_id: businessId,
+    bid_amount: generatedBid.amount,
+    bid_description: generatedBid.description,
+    pricing_breakdown: generatedBid.breakdown,
+    pricing_reasoning: generatedBid.reasoning,
+    is_training: true,
+    is_ai_generated: true,
+    category: category
+  };
+
+  // Only add request_id if it's not null
+  if (requestId) {
+    insertData.request_id = requestId;
+  }
+
   const { data: aiResponse, error: insertError } = await supabase
     .from('autobid_training_responses')
-    .insert({
-      business_id: businessId,
-      request_id: requestId,
-      bid_amount: generatedBid.amount,
-      bid_description: generatedBid.description,
-      pricing_breakdown: generatedBid.breakdown,
-      pricing_reasoning: generatedBid.reasoning,
-      is_training: true,
-      is_ai_generated: true,
-      category: category
-    })
+    .insert(insertData)
     .select()
     .single();
 
@@ -1276,11 +1306,24 @@ async function updateTrainingProgress(businessId, trainingResponseId) {
     return;
   }
 
+  // Get current progress first
+  const { data: currentProgress, error: progressFetchError } = await supabase
+    .from('autobid_training_progress')
+    .select('consecutive_approvals')
+    .eq('business_id', businessId)
+    .eq('category', response.category)
+    .single();
+
+  if (progressFetchError) {
+    console.error("❌ Error fetching current progress:", progressFetchError);
+    return;
+  }
+
   // Update progress
   const { error: progressError } = await supabase
     .from('autobid_training_progress')
     .update({
-      consecutive_approvals: supabase.sql`consecutive_approvals + 1`,
+      consecutive_approvals: (currentProgress?.consecutive_approvals || 0) + 1,
       last_training_date: new Date().toISOString()
     })
     .eq('business_id', businessId)
