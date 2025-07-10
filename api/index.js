@@ -221,16 +221,29 @@ app.get("/", (req, res) => {
             API Server Running
         </div>
         <div class="description">
-            Your AI-powered bid generation backend is online and ready to serve requests.
+            Your comprehensive Bidi backend is online and ready to serve requests.
         </div>
         
         <div class="endpoints">
             <h3>🔗 Available Endpoints</h3>
             <div class="endpoint">GET /api/health - Health check</div>
+            <div class="endpoint">GET /api/test - CORS test</div>
+            <div class="endpoint">GET /api/business-profiles/:id - Business profiles</div>
+            <div class="endpoint">POST /trigger-autobid - Production autobidding</div>
             <div class="endpoint">POST /api/autobid/generate-sample-bid - AI training</div>
             <div class="endpoint">POST /api/autobid/training-feedback - Training feedback</div>
             <div class="endpoint">GET /api/autobid/training-data/:id/:category - Training data</div>
-            <div class="endpoint">POST /trigger-autobid - Production autobidding</div>
+            <div class="endpoint">GET /api/autobid/training-status/:id - Training status</div>
+            <div class="endpoint">POST /account_session - Stripe onboarding</div>
+            <div class="endpoint">POST /account - Stripe account creation</div>
+            <div class="endpoint">POST /create-checkout-session - Stripe payments</div>
+            <div class="endpoint">POST /check-payment-status - Payment status</div>
+            <div class="endpoint">POST /create-login-link - Stripe login</div>
+            <div class="endpoint">GET /check-account-capabilities/:id - Account capabilities</div>
+            <div class="endpoint">POST /webhook - Stripe webhooks</div>
+            <div class="endpoint">POST /api/auth/* - Authentication routes</div>
+            <div class="endpoint">POST /api/google-calendar/* - Google Calendar integration</div>
+            <div class="endpoint">POST /api/google-places/* - Google Places integration</div>
         </div>
         
         <div class="timestamp">
