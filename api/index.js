@@ -108,8 +108,141 @@ app.get('/api/business-profiles/:id', async (req, res) => {
   }
 });
 
-// basic page
-app.get("/", (req, res) => res.send("Bidi Express is Running!"));
+// Landing page with nice styling
+app.get("/", (req, res) => {
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bidi Express API</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #333;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 3rem;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            text-align: center;
+            max-width: 500px;
+            width: 90%;
+        }
+        
+        .logo {
+            font-size: 2.5rem;
+            font-weight: bold;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 1rem;
+        }
+        
+        .status {
+            font-size: 1.2rem;
+            color: #4CAF50;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+        }
+        
+        .description {
+            color: #666;
+            line-height: 1.6;
+            margin-bottom: 2rem;
+        }
+        
+        .endpoints {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 1.5rem;
+            text-align: left;
+        }
+        
+        .endpoints h3 {
+            color: #333;
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+        }
+        
+        .endpoint {
+            background: white;
+            border-radius: 8px;
+            padding: 0.8rem;
+            margin-bottom: 0.5rem;
+            border-left: 4px solid #667eea;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.9rem;
+        }
+        
+        .timestamp {
+            color: #999;
+            font-size: 0.9rem;
+            margin-top: 1rem;
+        }
+        
+        .health-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            background: #4CAF50;
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">🚀 Bidi Express</div>
+        <div class="status">
+            <span class="health-indicator"></span>
+            API Server Running
+        </div>
+        <div class="description">
+            Your AI-powered bid generation backend is online and ready to serve requests.
+        </div>
+        
+        <div class="endpoints">
+            <h3>🔗 Available Endpoints</h3>
+            <div class="endpoint">GET /api/health - Health check</div>
+            <div class="endpoint">POST /api/autobid/generate-sample-bid - AI training</div>
+            <div class="endpoint">POST /api/autobid/training-feedback - Training feedback</div>
+            <div class="endpoint">GET /api/autobid/training-data/:id/:category - Training data</div>
+            <div class="endpoint">POST /trigger-autobid - Production autobidding</div>
+        </div>
+        
+        <div class="timestamp">
+            Last updated: ${new Date().toLocaleString()}
+        </div>
+    </div>
+</body>
+</html>
+  `;
+  
+  res.send(html);
+});
 
 // Test endpoint for CORS
 app.get("/api/test", (req, res) => {
