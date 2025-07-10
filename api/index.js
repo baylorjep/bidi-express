@@ -1110,24 +1110,75 @@ app.post('/api/autobid/training-feedback', async (req, res) => {
       sample_bid_id,
       approved,
       feedback,
-      suggested_changes
+      suggested_changes,
+      // New field for AI bid data
+      ai_bid_data
     } = req.body;
 
     // Use the correct field names
     const actualBusinessId = business_id;
-    const actualTrainingResponseId = training_response_id || sample_bid_id;
     const actualFeedbackType = feedback_type || (approved ? 'approved' : 'rejected');
     const actualFeedbackText = feedback_text || feedback || (approved ? 'Approved' : 'Needs adjustment');
 
-    if (!actualBusinessId || !actualTrainingResponseId || !actualFeedbackType) {
+    if (!actualBusinessId || !actualFeedbackType) {
       console.log("❌ Missing required fields:");
       console.log("  - business_id:", actualBusinessId);
-      console.log("  - training_response_id:", actualTrainingResponseId);
       console.log("  - feedback_type:", actualFeedbackType);
       
       return res.status(400).json({ 
-        error: "Missing required fields: business_id, training_response_id (or sample_bid_id), and feedback_type (or approved)" 
+        error: "Missing required fields: business_id and feedback_type (or approved)" 
       });
+    }
+
+    // Handle AI bid data insertion if provided
+    let actualTrainingResponseId = training_response_id || sample_bid_id;
+    
+    if (ai_bid_data && !actualTrainingResponseId) {
+      console.log("📝 Inserting AI bid data into training responses");
+      
+      // Get a training request ID for this category
+      const { data: trainingRequests, error: trainingError } = await supabase
+        .from('autobid_training_requests')
+        .select('id')
+        .eq('category', category)
+        .limit(1);
+
+      if (trainingError) {
+        console.error("❌ Error fetching training requests:", trainingError);
+        return res.status(500).json({ error: "Failed to fetch training requests" });
+      }
+
+      if (!trainingRequests || trainingRequests.length === 0) {
+        console.error("❌ No training requests available for category:", category);
+        return res.status(404).json({ error: "No training requests available for this category" });
+      }
+
+      const requestId = trainingRequests[0].id;
+
+      // Insert the AI bid
+      const { data: aiResponse, error: aiError } = await supabase
+        .from('autobid_training_responses')
+        .insert({
+          business_id: actualBusinessId,
+          request_id: requestId,
+          bid_amount: ai_bid_data.bid_amount,
+          bid_description: ai_bid_data.bid_description,
+          pricing_breakdown: ai_bid_data.pricing_breakdown,
+          pricing_reasoning: ai_bid_data.pricing_reasoning,
+          is_training: true,
+          is_ai_generated: true,
+          category: category
+        })
+        .select()
+        .single();
+
+      if (aiError) {
+        console.error("❌ Error inserting AI bid:", aiError);
+        return res.status(500).json({ error: "Failed to insert AI bid" });
+      }
+
+      actualTrainingResponseId = aiResponse.id;
+      console.log("✅ AI bid inserted with ID:", actualTrainingResponseId);
     }
 
     // Check for existing feedback to prevent duplicates
@@ -1185,7 +1236,8 @@ app.post('/api/autobid/training-feedback', async (req, res) => {
 
     res.json({
       success: true,
-      feedback_id: feedbackData.id
+      feedback_id: feedbackData.id,
+      ai_bid_id: actualTrainingResponseId
     });
 
   } catch (error) {
