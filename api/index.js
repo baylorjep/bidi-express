@@ -78,7 +78,7 @@ app.use((req, res, next) => {
 app.use(express.json());
 
 // Serve static files (logo, favicon, etc.)
-app.use('/static', express.static('api/public'));
+app.use('/static', express.static('public'));
 
 // Mount Auth routes first
 app.use('/api/auth', authRoutes);
@@ -120,7 +120,7 @@ app.get("/", (req, res) => {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bidi Express API</title>
-    <link rel="icon" type="image/png" href="/static/bidi-favicon.png">
+    <link rel="icon" type="image/png" href="/static/Bidi-Favicon.png">
     <style>
         * {
             margin: 0;
@@ -231,7 +231,7 @@ app.get("/", (req, res) => {
     <body>
         <div class="container">
             <div class="logo">
-                <img src="/static/logo.svg" alt="Bidi Logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                <img src="/static/logo.svg" alt="Bidi Logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='block'; console.log('Logo failed to load');" onload="console.log('Logo loaded successfully');">
                 <div class="logo-text" style="display: none;">🚀 Bidi Express</div>
             </div>
         <div class="status">
