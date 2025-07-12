@@ -1506,6 +1506,13 @@ async function generateAIBidForTraining(trainingData, sampleRequest, category) {
   // Process training data for AI
   const processedData = processTrainingDataForAI(trainingData);
   
+  // Log feedback analysis for debugging
+  console.log("📊 Feedback Analysis:");
+  console.log("  - Pricing Adjustments:", processedData.feedback_preferences.pricing_adjustments);
+  console.log("  - Common Issues:", processedData.feedback_preferences.common_issues);
+  console.log("  - Specific Feedback:", processedData.feedback_preferences.specific_feedback.slice(0, 2));
+  console.log("  - Preferred Improvements:", processedData.feedback_preferences.preferred_improvements.slice(0, 2));
+  
   // Create AI prompt with training data
   const prompt = createTrainingAIPrompt(processedData, sampleRequest, category);
   
@@ -1751,6 +1758,8 @@ function analyzeFeedbackPreferences(feedback) {
   const preferences = {
     approval_rate: 0,
     common_issues: [],
+    pricing_adjustments: [],
+    specific_feedback: [],
     preferred_improvements: []
   };
 
@@ -1758,9 +1767,21 @@ function analyzeFeedbackPreferences(feedback) {
     const approvals = feedback.filter(f => f.feedback_type === 'approved').length;
     preferences.approval_rate = approvals / feedback.length;
 
-    // Extract common issues from rejected feedback
+    // Extract detailed feedback analysis from rejected feedback
     const rejectedFeedback = feedback.filter(f => f.feedback_type === 'rejected');
-    preferences.common_issues = extractCommonIssues(rejectedFeedback);
+    const feedbackAnalysis = extractCommonIssues(rejectedFeedback);
+    
+    preferences.common_issues = feedbackAnalysis.issues;
+    preferences.pricing_adjustments = feedbackAnalysis.pricingAdjustments;
+    preferences.specific_feedback = feedbackAnalysis.specificFeedback;
+
+    // Extract approved feedback patterns for positive learning
+    const approvedFeedback = feedback.filter(f => f.feedback_type === 'approved');
+    approvedFeedback.forEach(f => {
+      if (f.feedback_text) {
+        preferences.preferred_improvements.push(f.feedback_text);
+      }
+    });
   }
 
   return preferences;
@@ -1768,15 +1789,22 @@ function analyzeFeedbackPreferences(feedback) {
 
 function extractCommonIssues(rejectedFeedback) {
   const issues = [];
+  const pricingAdjustments = [];
+  const specificFeedback = [];
 
   rejectedFeedback.forEach(feedback => {
     const text = feedback.feedback_text?.toLowerCase() || '';
+    const specificIssues = feedback.specific_issues || {};
+    const suggestedImprovements = feedback.suggested_improvements || {};
 
-    if (text.includes('too high') || text.includes('expensive')) {
+    // Extract pricing-specific feedback
+    if (text.includes('too high') || text.includes('expensive') || text.includes('overpriced')) {
       issues.push('pricing_too_high');
+      pricingAdjustments.push('reduce_pricing');
     }
-    if (text.includes('too low') || text.includes('cheap')) {
+    if (text.includes('too low') || text.includes('cheap') || text.includes('underpriced')) {
       issues.push('pricing_too_low');
+      pricingAdjustments.push('increase_pricing');
     }
     if (text.includes('missing') || text.includes('incomplete')) {
       issues.push('incomplete_description');
@@ -1784,9 +1812,34 @@ function extractCommonIssues(rejectedFeedback) {
     if (text.includes('wrong') || text.includes('incorrect')) {
       issues.push('incorrect_services');
     }
+
+    // Extract specific feedback from structured data
+    if (specificIssues.pricing) {
+      issues.push(`pricing_${specificIssues.pricing}`);
+      if (specificIssues.pricing === 'too_high') pricingAdjustments.push('reduce_pricing');
+      if (specificIssues.pricing === 'too_low') pricingAdjustments.push('increase_pricing');
+    }
+    if (specificIssues.description) {
+      issues.push(`description_${specificIssues.description}`);
+    }
+    if (specificIssues.services) {
+      issues.push(`services_${specificIssues.services}`);
+    }
+
+    // Store specific feedback text for AI learning
+    if (feedback.feedback_text) {
+      specificFeedback.push(feedback.feedback_text);
+    }
+    if (suggestedImprovements) {
+      specificFeedback.push(`Suggested: ${JSON.stringify(suggestedImprovements)}`);
+    }
   });
 
-  return [...new Set(issues)];
+  return {
+    issues: [...new Set(issues)],
+    pricingAdjustments: [...new Set(pricingAdjustments)],
+    specificFeedback: specificFeedback
+  };
 }
 
 function extractServicePreferences(responses) {
@@ -1861,7 +1914,7 @@ function createTrainingAIPrompt(processedData, sampleRequest, category) {
   basePrice = Math.round(basePrice * variation);
 
   return `
-You are an AI assistant that generates personalized bids for ${category} services based on a business's training data.
+You are an AI assistant that generates personalized bids for ${category} services based on a business's training data and feedback.
 
 ### BUSINESS TRAINING PATTERNS:
 - **Training Bid Range:** $${Math.min(...processedData.responses?.map(r => r.bid_amount) || [0])} - $${Math.max(...processedData.responses?.map(r => r.bid_amount) || [0])}
@@ -1871,9 +1924,20 @@ You are an AI assistant that generates personalized bids for ${category} service
 - **Description Style:** ${processedData.business_patterns.description_style}
 - **Pricing Factors:** ${processedData.business_patterns.pricing_factors.join(', ')}
 
-### FEEDBACK PREFERENCES:
+### CRITICAL FEEDBACK LEARNING:
 - **Approval Rate:** ${(processedData.feedback_preferences.approval_rate * 100).toFixed(1)}%
-- **Common Issues to Avoid:** ${processedData.feedback_preferences.common_issues.join(', ')}
+- **Pricing Adjustments Needed:** ${processedData.feedback_preferences.pricing_adjustments.join(', ') || 'none'}
+- **Common Issues to Avoid:** ${processedData.feedback_preferences.common_issues.join(', ') || 'none'}
+- **Specific Feedback Received:** ${processedData.feedback_preferences.specific_feedback.slice(0, 3).join(' | ') || 'none'}
+- **Preferred Improvements:** ${processedData.feedback_preferences.preferred_improvements.slice(0, 2).join(' | ') || 'none'}
+
+### PRICING ADJUSTMENT INSTRUCTIONS:
+${processedData.feedback_preferences.pricing_adjustments.includes('reduce_pricing') ? 
+  '⚠️ CRITICAL: Previous feedback indicates pricing was TOO HIGH. Reduce your bid amount by 15-25% from the training average.' : ''}
+${processedData.feedback_preferences.pricing_adjustments.includes('increase_pricing') ? 
+  '⚠️ CRITICAL: Previous feedback indicates pricing was TOO LOW. Increase your bid amount by 15-25% from the training average.' : ''}
+${processedData.feedback_preferences.pricing_adjustments.length === 0 ? 
+  '✅ No major pricing issues identified in feedback. Use training average as baseline.' : ''}
 
 ### SPECIFIC REQUEST ANALYSIS:
 - **Duration:** ${sampleRequest.duration}
@@ -1888,26 +1952,29 @@ You are an AI assistant that generates personalized bids for ${category} service
 - **Service Types:** ${categoryInfo.serviceTypes}
 
 ### INSTRUCTIONS:
-Generate a bid that matches this business's style and pricing patterns. Consider:
-1. The specific request details (duration, event type, guest count, location)
-2. Their training bid range and pricing strategy
-3. Their preferred service emphasis and description style
-4. Common issues they've identified in previous feedback
-5. The requirements of this specific request
+Generate a bid that matches this business's style and pricing patterns. CRITICAL REQUIREMENTS:
 
-IMPORTANT: Do NOT always use the average training amount. Instead:
-- Calculate a price based on the specific request details
-- Consider duration, complexity, and requirements
-- Stay within the business's training bid range
-- Add appropriate variation based on the request specifics
+1. **PRICING ADJUSTMENT:** ${processedData.feedback_preferences.pricing_adjustments.includes('reduce_pricing') ? 
+    'REDUCE pricing by 15-25% from training average due to previous "too high" feedback' : 
+    processedData.feedback_preferences.pricing_adjustments.includes('increase_pricing') ? 
+    'INCREASE pricing by 15-25% from training average due to previous "too low" feedback' : 
+    'Use training average as baseline with normal variation'}
+
+2. **AVOID THESE ISSUES:** ${processedData.feedback_preferences.common_issues.join(', ') || 'none'}
+
+3. **INCORPORATE THESE IMPROVEMENTS:** ${processedData.feedback_preferences.preferred_improvements.slice(0, 2).join(' | ') || 'none'}
+
+4. **Consider the specific request details** (duration, event type, guest count, location, requirements)
+
+5. **Stay within the business's training bid range** but apply feedback-based adjustments
 
 ### RETURN JSON FORMAT ONLY:
 \`\`\`json
 {
-  "bidAmount": <calculated bid amount based on request specifics>,
-  "bidDescription": "<detailed bid description matching business style>",
+  "bidAmount": <calculated bid amount with feedback-based adjustments>,
+  "bidDescription": "<detailed bid description incorporating feedback improvements>",
   "pricingBreakdown": "<detailed pricing breakdown>",
-  "pricingReasoning": "<explanation of pricing strategy>"
+  "pricingReasoning": "<explanation of pricing strategy including feedback considerations>"
 }
 \`\`\`
 `;
