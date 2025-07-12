@@ -239,7 +239,7 @@ app.get("/", (req, res) => {
             API Server Running
         </div>
         <div class="description">
-            Your comprehensive Bidi backend is online and ready to serve requests.
+            Bidi Express is online and ready to serve requests.
         </div>
         
         <div class="endpoints">
