@@ -1816,17 +1816,32 @@ async function generateAIBidForTraining(trainingData, sampleRequest, category, b
   console.log(`🤖 Generating AI bid for training with ${trainingData.responses.length} responses`);
 
   // Fetch business pricing rules for training
-  console.log(`🔍 Fetching pricing rules for Business ${businessId}`);
+  console.log(`🔍 Fetching pricing rules for Business ${businessId}, Category: ${category}`);
   const { data: pricingRules, error: pricingError } = await supabase
     .from("business_pricing_rules")
     .select("*")
     .eq("business_id", businessId)
+    .eq("category", category)
     .single();
 
   if (pricingError) {
-    console.warn("⚠️ No explicit pricing rules found for Business ID:", businessId);
+    console.warn("⚠️ No explicit pricing rules found for Business ID:", businessId, "Category:", category);
   } else {
     console.log("✅ Found pricing rules for business:", pricingRules);
+  }
+
+  // Fetch business packages for training
+  console.log(`📦 Fetching packages for Business ${businessId}`);
+  const { data: businessPackages, error: packagesError } = await supabase
+    .from("business_packages")
+    .select("*")
+    .eq("business_id", businessId)
+    .order("display_order", { ascending: true });
+
+  if (packagesError) {
+    console.warn("⚠️ No packages found for Business ID:", businessId);
+  } else {
+    console.log(`📦 Found ${businessPackages?.length || 0} packages for business`);
   }
 
   // Process training data for AI
@@ -1840,7 +1855,7 @@ async function generateAIBidForTraining(trainingData, sampleRequest, category, b
   console.log("  - Preferred Improvements:", processedData.feedback_preferences.preferred_improvements.slice(0, 2));
   
   // Create AI prompt with training data AND pricing rules
-  const prompt = createTrainingAIPrompt(processedData, sampleRequest, category, pricingRules);
+  const prompt = createTrainingAIPrompt(processedData, sampleRequest, category, pricingRules, businessPackages);
   
   console.log("📜 Training AI Prompt:", prompt);
 
@@ -2184,7 +2199,7 @@ function extractServicePreferences(responses) {
   return [...new Set(preferences)];
 }
 
-function createTrainingAIPrompt(processedData, sampleRequest, category, pricingRules) {
+function createTrainingAIPrompt(processedData, sampleRequest, category, pricingRules, businessPackages) {
   const categoryHandlers = {
     photography: {
       pricingFactors: "hourly rates, coverage duration, deliverables, equipment needs, post-production time",
@@ -2224,10 +2239,11 @@ function createTrainingAIPrompt(processedData, sampleRequest, category, pricingR
     
     return `
 **PRICING RULES CONFIGURATION:**
+- **Category:** ${rules.category || 'Not specified'}
+- **Pricing Model:** ${rules.pricing_model || 'Not specified'}
 - **Base Price:** $${rules.base_price || 'Not set'}
 - **Min Price:** $${rules.min_price || 'No limit'}
 - **Max Price:** $${rules.max_price || 'No limit'}
-- **Pricing Model:** ${rules.pricing_model || 'Not specified'}
 - **Hourly Rate:** $${rules.hourly_rate || 'Not set'}
 - **Per Person Rate:** $${rules.per_person_rate || 'Not set'}
 - **Wedding Premium:** ${rules.wedding_premium ? `$${rules.wedding_premium}` : 'Not set'}
@@ -2238,18 +2254,49 @@ function createTrainingAIPrompt(processedData, sampleRequest, category, pricingR
 - **Bid Aggressiveness:** ${rules.bid_aggressiveness || 'Not specified'}
 - **Accept Unknowns:** ${rules.accept_unknowns ? 'Yes' : 'No'}
 
-**DURATION MULTIPLIERS:** ${rules.duration_multipliers ? JSON.stringify(rules.duration_multipliers) : 'Not configured'}
-**SERVICE ADDONS:** ${rules.service_addons ? JSON.stringify(rules.service_addons) : 'Not configured'}
-**SEASONAL PRICING:** ${rules.seasonal_pricing ? JSON.stringify(rules.seasonal_pricing) : 'Not configured'}
-**GROUP DISCOUNTS:** ${rules.group_discounts ? JSON.stringify(rules.group_discounts) : 'Not configured'}
-**PACKAGE DISCOUNTS:** ${rules.package_discounts ? JSON.stringify(rules.package_discounts) : 'Not configured'}
-**CUSTOM PRICING RULES:** ${rules.custom_pricing_rules ? JSON.stringify(rules.custom_pricing_rules) : 'Not configured'}
+**CATEGORY-SPECIFIC PRICING:**
+- **Full Day Rate:** $${rules.full_day_rate || 'Not set'}
+- **Half Day Rate:** $${rules.half_day_rate || 'Not set'}
+- **Editing Rate:** $${rules.editing_rate || 'Not set'}
+- **Hair Only Rate:** $${rules.hair_only_rate || 'Not set'}
+- **Makeup Only Rate:** $${rules.makeup_only_rate || 'Not set'}
+- **Bridal Package Price:** $${rules.bridal_package_price || 'Not set'}
+- **Ceremony Package Price:** $${rules.ceremony_package_price || 'Not set'}
+- **Full Service Price:** $${rules.full_service_price || 'Not set'}
+- **Highlight Video Price:** $${rules.highlight_video_price || 'Not set'}
+- **Cinematic Package Price:** $${rules.cinematic_package_price || 'Not set'}
 
-**DEFAULT MESSAGE:** ${rules.default_message || 'Not set'}
-**ADDITIONAL COMMENTS:** ${rules.additional_comments || 'None'}
-**ADDITIONAL NOTES:** ${rules.additional_notes || 'None'}
-**PRICING PACKAGES:** ${rules.pricing_packages || 'Not specified'}
-**BLOCKLIST KEYWORDS:** ${rules.blocklist_keywords ? JSON.stringify(rules.blocklist_keywords) : 'None'}`;
+**COMPLEX PRICING STRUCTURES:**
+- **Duration Multipliers:** ${rules.duration_multipliers ? JSON.stringify(rules.duration_multipliers) : 'Not configured'}
+- **Service Addons:** ${rules.service_addons ? JSON.stringify(rules.service_addons) : 'Not configured'}
+- **Seasonal Pricing:** ${rules.seasonal_pricing ? JSON.stringify(rules.seasonal_pricing) : 'Not configured'}
+- **Group Discounts:** ${rules.group_discounts ? JSON.stringify(rules.group_discounts) : 'Not configured'}
+- **Package Discounts:** ${rules.package_discounts ? JSON.stringify(rules.package_discounts) : 'Not configured'}
+- **Custom Pricing Rules:** ${rules.custom_pricing_rules ? JSON.stringify(rules.custom_pricing_rules) : 'Not configured'}
+
+**CATEGORY-SPECIFIC PACKAGES:**
+- **Flower Tiers:** ${rules.flower_tiers ? JSON.stringify(rules.flower_tiers) : 'Not configured'}
+- **Equipment Packages:** ${rules.equipment_packages ? JSON.stringify(rules.equipment_packages) : 'Not configured'}
+- **Menu Tiers:** ${rules.menu_tiers ? JSON.stringify(rules.menu_tiers) : 'Not configured'}
+- **Service Staff:** ${rules.service_staff ? JSON.stringify(rules.service_staff) : 'Not configured'}
+
+**CONTENT & MESSAGING:**
+- **Default Message:** ${rules.default_message || 'Not set'}
+- **Additional Comments:** ${rules.additional_comments || 'None'}
+- **Additional Notes:** ${rules.additional_notes || 'None'}
+- **Blocklist Keywords:** ${rules.blocklist_keywords ? JSON.stringify(rules.blocklist_keywords) : 'None'}`;
+  };
+
+  // Format business packages for AI consumption
+  const formatBusinessPackages = (packages) => {
+    if (!packages || packages.length === 0) return "No packages configured";
+    
+    return packages.map(pkg => `
+**PACKAGE: ${pkg.name}**
+- **Price:** $${pkg.price}
+- **Description:** ${pkg.description || 'No description'}
+- **Features:** ${pkg.features ? pkg.features.join(', ') : 'No features listed'}
+- **Display Order:** ${pkg.display_order || 'Not specified'}`).join('\n\n');
   };
 
   // Calculate base price using business pricing rules (PRIMARY) or training data (FALLBACK)
@@ -2263,22 +2310,110 @@ function createTrainingAIPrompt(processedData, sampleRequest, category, pricingR
     basePrice = parseFloat(pricingRules.base_price);
     console.log(`💰 Using business base price: $${basePrice}`);
     
-    // Apply business-specific adjustments
-    if (pricingRules.hourly_rate && requestDuration) {
-      const hours = parseInt(requestDuration.match(/(\d+)/)?.[1] || 1);
-      basePrice = parseFloat(pricingRules.hourly_rate) * hours;
-      console.log(`⏰ Applied hourly rate: $${pricingRules.hourly_rate} × ${hours} hours = $${basePrice}`);
+    // Apply business-specific adjustments based on category
+    const category = pricingRules.category;
+    
+    // Category-specific pricing logic
+    if (category === 'photography' || category === 'videography') {
+      if (pricingRules.hourly_rate && requestDuration) {
+        const hours = parseInt(requestDuration.match(/(\d+)/)?.[1] || 1);
+        if (hours >= 8 && pricingRules.full_day_rate) {
+          basePrice = parseFloat(pricingRules.full_day_rate);
+          console.log(`📸 Applied full day rate: $${basePrice}`);
+        } else if (hours >= 4 && pricingRules.half_day_rate) {
+          basePrice = parseFloat(pricingRules.half_day_rate);
+          console.log(`📸 Applied half day rate: $${basePrice}`);
+        } else {
+          basePrice = parseFloat(pricingRules.hourly_rate) * hours;
+          console.log(`⏰ Applied hourly rate: $${pricingRules.hourly_rate} × ${hours} hours = $${basePrice}`);
+        }
+      }
+      
+      // Add editing costs for videography
+      if (category === 'videography' && pricingRules.editing_rate) {
+        basePrice += parseFloat(pricingRules.editing_rate);
+        console.log(`🎬 Added editing rate: +$${pricingRules.editing_rate} = $${basePrice}`);
+      }
     }
     
-    if (pricingRules.per_person_rate && guestCount > 1) {
-      basePrice = parseFloat(pricingRules.per_person_rate) * guestCount;
-      console.log(`👥 Applied per-person rate: $${pricingRules.per_person_rate} × ${guestCount} people = $${basePrice}`);
+    else if (category === 'catering') {
+      if (pricingRules.per_person_rate && guestCount > 1) {
+        basePrice = parseFloat(pricingRules.per_person_rate) * guestCount;
+        console.log(`👥 Applied per-person rate: $${pricingRules.per_person_rate} × ${guestCount} people = $${basePrice}`);
+      }
+      
+      // Apply menu tiers if available
+      if (pricingRules.menu_tiers && sampleRequest.food_preferences) {
+        console.log(`🍽️ Menu tiers available: ${JSON.stringify(pricingRules.menu_tiers)}`);
+      }
     }
     
+    else if (category === 'beauty') {
+      if (sampleRequest.service_type === 'hair' && pricingRules.hair_only_rate) {
+        basePrice = parseFloat(pricingRules.hair_only_rate);
+        console.log(`💇 Applied hair only rate: $${basePrice}`);
+      } else if (sampleRequest.service_type === 'makeup' && pricingRules.makeup_only_rate) {
+        basePrice = parseFloat(pricingRules.makeup_only_rate);
+        console.log(`💄 Applied makeup only rate: $${basePrice}`);
+      } else if (pricingRules.bridal_package_price && eventType === 'wedding') {
+        basePrice = parseFloat(pricingRules.bridal_package_price);
+        console.log(`👰 Applied bridal package price: $${basePrice}`);
+      }
+    }
+    
+    else if (category === 'florist') {
+      if (pricingRules.flower_tiers) {
+        console.log(`🌸 Flower tiers available: ${JSON.stringify(pricingRules.flower_tiers)}`);
+      }
+    }
+    
+    else if (category === 'dj') {
+      if (pricingRules.hourly_rate && requestDuration) {
+        const hours = parseInt(requestDuration.match(/(\d+)/)?.[1] || 1);
+        basePrice = parseFloat(pricingRules.hourly_rate) * hours;
+        console.log(`🎵 Applied hourly rate: $${pricingRules.hourly_rate} × ${hours} hours = $${basePrice}`);
+      }
+      
+      // Apply equipment packages if available
+      if (pricingRules.equipment_packages) {
+        console.log(`🎧 Equipment packages available: ${JSON.stringify(pricingRules.equipment_packages)}`);
+      }
+    }
+    
+    else if (category === 'wedding_planning') {
+      if (pricingRules.full_service_price && sampleRequest.planning_level === 'full') {
+        basePrice = parseFloat(pricingRules.full_service_price);
+        console.log(`📋 Applied full service price: $${basePrice}`);
+      } else if (pricingRules.ceremony_package_price && sampleRequest.planning_level === 'ceremony') {
+        basePrice = parseFloat(pricingRules.ceremony_package_price);
+        console.log(`💒 Applied ceremony package price: $${basePrice}`);
+      }
+    }
+    
+    // Apply universal adjustments
     if (pricingRules.wedding_premium && eventType === 'wedding') {
       basePrice += parseFloat(pricingRules.wedding_premium);
       console.log(`💒 Added wedding premium: +$${pricingRules.wedding_premium} = $${basePrice}`);
     }
+    
+    // Apply travel fees if location is specified
+    if (pricingRules.travel_fee_per_mile && sampleRequest.location) {
+      // This would need actual distance calculation in production
+      console.log(`🚗 Travel fee available: $${pricingRules.travel_fee_per_mile} per mile`);
+    }
+    
+    // Apply rush fees if timeline is tight
+    if (pricingRules.rush_fee_percentage && sampleRequest.timeline === 'rush') {
+      const rushFee = basePrice * (parseFloat(pricingRules.rush_fee_percentage) / 100);
+      basePrice += rushFee;
+      console.log(`⚡ Added rush fee: +$${rushFee.toFixed(2)} = $${basePrice}`);
+    }
+    
+    // Apply group discounts if applicable
+    if (pricingRules.group_discounts && guestCount > 10) {
+      console.log(`👥 Group discounts available: ${JSON.stringify(pricingRules.group_discounts)}`);
+    }
+    
   } else {
     // Fallback to training data average
     basePrice = processedData.business_patterns.average_bid_amount;
@@ -2308,6 +2443,9 @@ You are an AI assistant that generates personalized bids for ${category} service
 
 ### BUSINESS PRICING RULES (PRIMARY FOUNDATION):
 ${formatPricingRules(pricingRules)}
+
+### BUSINESS PACKAGES (AVAILABLE OPTIONS):
+${formatBusinessPackages(businessPackages)}
 
 ### BUSINESS TRAINING PATTERNS (ENHANCEMENT DATA):
 - **Training Bid Range:** $${Math.min(...processedData.responses?.map(r => r.bid_amount) || [0])} - $${Math.max(...processedData.responses?.map(r => r.bid_amount) || [0])}
@@ -2348,11 +2486,40 @@ ${processedData.feedback_preferences.pricing_adjustments.length === 0 ?
 **PRIMARY PRICING FOUNDATION:** Use the business's explicit pricing rules as your starting point, NOT training averages.
 
 1. **START WITH BUSINESS BASE PRICE:** $${pricingRules?.base_price || 'Calculate from pricing model'}
-2. **APPLY PRICING MODEL:**
-   - If hourly_rate is set: Base Price = Hourly Rate × Event Duration
-   - If per_person_rate is set: Base Price = Per Person Rate × Guest Count
-   - If base_price is set: Use as starting point
-   - Otherwise: Use training average as fallback
+2. **APPLY CATEGORY-SPECIFIC PRICING MODEL:**
+   ${pricingRules?.category === 'photography' || pricingRules?.category === 'videography' ? `
+   **PHOTOGRAPHY/VIDEOGRAPHY:**
+   - If full day (8+ hours): Use full_day_rate $${pricingRules?.full_day_rate || 'Not set'}
+   - If half day (4+ hours): Use half_day_rate $${pricingRules?.half_day_rate || 'Not set'}
+   - Otherwise: Hourly Rate × Event Duration
+   - For videography: Add editing_rate $${pricingRules?.editing_rate || 'Not set'}` : ''}
+   
+   ${pricingRules?.category === 'catering' ? `
+   **CATERING:**
+   - Per Person Rate × Guest Count
+   - Apply menu_tiers for food preferences
+   - Consider service_staff requirements` : ''}
+   
+   ${pricingRules?.category === 'beauty' ? `
+   **BEAUTY:**
+   - Hair only: hair_only_rate $${pricingRules?.hair_only_rate || 'Not set'}
+   - Makeup only: makeup_only_rate $${pricingRules?.makeup_only_rate || 'Not set'}
+   - Bridal package: bridal_package_price $${pricingRules?.bridal_package_price || 'Not set'}` : ''}
+   
+   ${pricingRules?.category === 'florist' ? `
+   **FLORIST:**
+   - Apply flower_tiers for arrangement types
+   - Consider seasonal pricing` : ''}
+   
+   ${pricingRules?.category === 'dj' ? `
+   **DJ:**
+   - Hourly Rate × Event Duration
+   - Apply equipment_packages for additional services` : ''}
+   
+   ${pricingRules?.category === 'wedding_planning' ? `
+   **WEDDING PLANNING:**
+   - Full service: full_service_price $${pricingRules?.full_service_price || 'Not set'}
+   - Ceremony only: ceremony_package_price $${pricingRules?.ceremony_package_price || 'Not set'}` : ''}
 
 3. **APPLY BUSINESS-SPECIFIC ADJUSTMENTS:**
    - **Wedding Premium:** ${pricingRules?.wedding_premium ? `Add $${pricingRules.wedding_premium} for weddings` : 'No wedding premium'}
@@ -2367,6 +2534,7 @@ ${processedData.feedback_preferences.pricing_adjustments.length === 0 ?
    - Minimum Price: $${pricingRules?.min_price || 'No limit'}
    - Maximum Price: $${pricingRules?.max_price || 'No limit'}
    - Bid Aggressiveness: ${pricingRules?.bid_aggressiveness || 'Not specified'}
+   - Accept Unknowns: ${pricingRules?.accept_unknowns ? 'Yes' : 'No'}
 
 5. **APPLY FEEDBACK ADJUSTMENTS:**
    ${processedData.feedback_preferences.pricing_adjustments.includes('reduce_pricing') ? 
@@ -2378,6 +2546,7 @@ ${processedData.feedback_preferences.pricing_adjustments.length === 0 ?
    - Ensure price is within business min/max constraints
    - Ensure price is reasonable ($50-$50k range)
    - Match business's bid aggressiveness level
+   - Avoid blocklist_keywords: ${pricingRules?.blocklist_keywords ? JSON.stringify(pricingRules.blocklist_keywords) : 'None'}
 
 ### TRAINING DATA INTEGRATION:
 Use the business's training patterns to enhance your bid (but don't override pricing rules):

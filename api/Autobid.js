@@ -454,10 +454,24 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             .from("business_pricing_rules")
             .select("*")
             .eq("business_id", businessId)
+            .eq("category", requestDetails.service_category)
             .single();
 
         if (pricingError) {
-            console.warn("⚠️ No explicit pricing rules found for Business ID:", businessId);
+            console.warn("⚠️ No explicit pricing rules found for Business ID:", businessId, "Category:", requestDetails.service_category);
+        }
+
+        // Step 3.5: Retrieve the business's packages
+        const { data: businessPackages, error: packagesError } = await supabase
+            .from("business_packages")
+            .select("*")
+            .eq("business_id", businessId)
+            .order("display_order", { ascending: true });
+
+        if (packagesError) {
+            console.warn("⚠️ No packages found for Business ID:", businessId);
+        } else {
+            console.log(`📦 Found ${businessPackages?.length || 0} packages for business`);
         }
 
         // Step 4: Get training data for enhanced AI generation
@@ -488,7 +502,8 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             formattedRequestData,
             pricingRules,
             formattedBidHistory,
-            trainingData
+            trainingData,
+            businessPackages
         );
 
         // Step 8: Use OpenAI to Generate the Bid
@@ -595,7 +610,7 @@ async function getBusinessTrainingData(businessId, category) {
 }
 
 // Enhanced AI prompt function that incorporates training data
-const getEnhancedCategorySpecificPrompt = (category, requestData, pricingRules, bidHistory, trainingData) => {
+const getEnhancedCategorySpecificPrompt = (category, requestData, pricingRules, bidHistory, trainingData, businessPackages) => {
     // Process training data for AI
     const processedTrainingData = processTrainingDataForAI(trainingData);
     
@@ -605,10 +620,11 @@ const getEnhancedCategorySpecificPrompt = (category, requestData, pricingRules, 
         
         return `
 **PRICING RULES CONFIGURATION:**
+- **Category:** ${rules.category || 'Not specified'}
+- **Pricing Model:** ${rules.pricing_model || 'Not specified'}
 - **Base Price:** $${rules.base_price || 'Not set'}
 - **Min Price:** $${rules.min_price || 'No limit'}
 - **Max Price:** $${rules.max_price || 'No limit'}
-- **Pricing Model:** ${rules.pricing_model || 'Not specified'}
 - **Hourly Rate:** $${rules.hourly_rate || 'Not set'}
 - **Per Person Rate:** $${rules.per_person_rate || 'Not set'}
 - **Wedding Premium:** ${rules.wedding_premium ? `$${rules.wedding_premium}` : 'Not set'}
@@ -619,18 +635,49 @@ const getEnhancedCategorySpecificPrompt = (category, requestData, pricingRules, 
 - **Bid Aggressiveness:** ${rules.bid_aggressiveness || 'Not specified'}
 - **Accept Unknowns:** ${rules.accept_unknowns ? 'Yes' : 'No'}
 
-**DURATION MULTIPLIERS:** ${rules.duration_multipliers ? JSON.stringify(rules.duration_multipliers) : 'Not configured'}
-**SERVICE ADDONS:** ${rules.service_addons ? JSON.stringify(rules.service_addons) : 'Not configured'}
-**SEASONAL PRICING:** ${rules.seasonal_pricing ? JSON.stringify(rules.seasonal_pricing) : 'Not configured'}
-**GROUP DISCOUNTS:** ${rules.group_discounts ? JSON.stringify(rules.group_discounts) : 'Not configured'}
-**PACKAGE DISCOUNTS:** ${rules.package_discounts ? JSON.stringify(rules.package_discounts) : 'Not configured'}
-**CUSTOM PRICING RULES:** ${rules.custom_pricing_rules ? JSON.stringify(rules.custom_pricing_rules) : 'Not configured'}
+**CATEGORY-SPECIFIC PRICING:**
+- **Full Day Rate:** $${rules.full_day_rate || 'Not set'}
+- **Half Day Rate:** $${rules.half_day_rate || 'Not set'}
+- **Editing Rate:** $${rules.editing_rate || 'Not set'}
+- **Hair Only Rate:** $${rules.hair_only_rate || 'Not set'}
+- **Makeup Only Rate:** $${rules.makeup_only_rate || 'Not set'}
+- **Bridal Package Price:** $${rules.bridal_package_price || 'Not set'}
+- **Ceremony Package Price:** $${rules.ceremony_package_price || 'Not set'}
+- **Full Service Price:** $${rules.full_service_price || 'Not set'}
+- **Highlight Video Price:** $${rules.highlight_video_price || 'Not set'}
+- **Cinematic Package Price:** $${rules.cinematic_package_price || 'Not set'}
 
-**DEFAULT MESSAGE:** ${rules.default_message || 'Not set'}
-**ADDITIONAL COMMENTS:** ${rules.additional_comments || 'None'}
-**ADDITIONAL NOTES:** ${rules.additional_notes || 'None'}
-**PRICING PACKAGES:** ${rules.pricing_packages || 'Not specified'}
-**BLOCKLIST KEYWORDS:** ${rules.blocklist_keywords ? JSON.stringify(rules.blocklist_keywords) : 'None'}`;
+**COMPLEX PRICING STRUCTURES:**
+- **Duration Multipliers:** ${rules.duration_multipliers ? JSON.stringify(rules.duration_multipliers) : 'Not configured'}
+- **Service Addons:** ${rules.service_addons ? JSON.stringify(rules.service_addons) : 'Not configured'}
+- **Seasonal Pricing:** ${rules.seasonal_pricing ? JSON.stringify(rules.seasonal_pricing) : 'Not configured'}
+- **Group Discounts:** ${rules.group_discounts ? JSON.stringify(rules.group_discounts) : 'Not configured'}
+- **Package Discounts:** ${rules.package_discounts ? JSON.stringify(rules.package_discounts) : 'Not configured'}
+- **Custom Pricing Rules:** ${rules.custom_pricing_rules ? JSON.stringify(rules.custom_pricing_rules) : 'Not configured'}
+
+**CATEGORY-SPECIFIC PACKAGES:**
+- **Flower Tiers:** ${rules.flower_tiers ? JSON.stringify(rules.flower_tiers) : 'Not configured'}
+- **Equipment Packages:** ${rules.equipment_packages ? JSON.stringify(rules.equipment_packages) : 'Not configured'}
+- **Menu Tiers:** ${rules.menu_tiers ? JSON.stringify(rules.menu_tiers) : 'Not configured'}
+- **Service Staff:** ${rules.service_staff ? JSON.stringify(rules.service_staff) : 'Not configured'}
+
+**CONTENT & MESSAGING:**
+- **Default Message:** ${rules.default_message || 'Not set'}
+- **Additional Comments:** ${rules.additional_comments || 'None'}
+- **Additional Notes:** ${rules.additional_notes || 'None'}
+- **Blocklist Keywords:** ${rules.blocklist_keywords ? JSON.stringify(rules.blocklist_keywords) : 'None'}`;
+    };
+    
+    // Format business packages for AI consumption
+    const formatBusinessPackages = (packages) => {
+        if (!packages || packages.length === 0) return "No packages configured";
+        
+        return packages.map(pkg => `
+**PACKAGE: ${pkg.name}**
+- **Price:** $${pkg.price}
+- **Description:** ${pkg.description || 'No description'}
+- **Features:** ${pkg.features ? pkg.features.join(', ') : 'No features listed'}
+- **Display Order:** ${pkg.display_order || 'Not specified'}`).join('\n\n');
     };
     
     const basePrompt = `
@@ -642,6 +689,9 @@ const getEnhancedCategorySpecificPrompt = (category, requestData, pricingRules, 
 
         ### **BUSINESS PRICING RULES (PRIMARY PRICING FOUNDATION)**
         ${formatPricingRules(pricingRules)}
+
+        ### **BUSINESS PACKAGES (AVAILABLE OPTIONS)**
+        ${formatBusinessPackages(businessPackages)}
 
         ### **Business Training Patterns (ENHANCEMENT DATA)**
         - **Average Training Bid Amount:** $${processedTrainingData.business_patterns.average_bid_amount.toFixed(2)}
