@@ -111,7 +111,80 @@ app.get('/api/business-profiles/:id', async (req, res) => {
   }
 });
 
-// Landing page with nice styling
+// In-memory log storage (for development/debugging)
+const logStore = {
+  logs: [],
+  maxLogs: 1000, // Keep last 1000 logs
+  addLog(level, message, data = null) {
+    // Sanitize sensitive data before logging
+    let sanitizedData = null;
+    if (data) {
+      if (typeof data === 'object') {
+        sanitizedData = this.sanitizeData(data);
+      } else {
+        sanitizedData = data;
+      }
+    }
+    
+    const logEntry = {
+      id: Date.now() + Math.random(),
+      timestamp: new Date().toISOString(),
+      level,
+      message,
+      data: sanitizedData ? JSON.stringify(sanitizedData, null, 2) : null
+    };
+    
+    this.logs.unshift(logEntry); // Add to beginning
+    
+    // Keep only the last maxLogs entries
+    if (this.logs.length > this.maxLogs) {
+      this.logs = this.logs.slice(0, this.maxLogs);
+    }
+    
+    // Also log to console for Vercel (with sanitized data)
+    console.log(`[${logEntry.timestamp}] [${level.toUpperCase()}] ${message}`, sanitizedData || '');
+  },
+  
+  // Sanitize sensitive data
+  sanitizeData(data) {
+    if (!data || typeof data !== 'object') return data;
+    
+    const sanitized = { ...data };
+    
+    // Remove sensitive fields from request bodies
+    const sensitiveFields = [
+      'email', 'phone', 'name', 'first_name', 'last_name', 'address', 'location',
+      'additional_comments', 'special_requests', 'dietary_restrictions',
+      'music_preferences', 'hairstyle_preferences', 'makeup_style_preferences',
+      'flower_preferences', 'style_preferences', 'colors'
+    ];
+    
+    sensitiveFields.forEach(field => {
+      if (sanitized[field] !== undefined) {
+        sanitized[field] = '[REDACTED]';
+      }
+    });
+    
+    // Sanitize nested objects
+    Object.keys(sanitized).forEach(key => {
+      if (typeof sanitized[key] === 'object' && sanitized[key] !== null) {
+        sanitized[key] = this.sanitizeData(sanitized[key]);
+      }
+    });
+    
+    return sanitized;
+  }
+};
+
+// Enhanced logging functions
+const logger = {
+  info: (message, data) => logStore.addLog('info', message, data),
+  warn: (message, data) => logStore.addLog('warn', message, data),
+  error: (message, data) => logStore.addLog('error', message, data),
+  debug: (message, data) => logStore.addLog('debug', message, data)
+};
+
+// Landing page with logs viewer
 app.get("/", (req, res) => {
   const html = `
 <!DOCTYPE html>
@@ -132,20 +205,22 @@ app.get("/", (req, res) => {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
             color: #333;
         }
         
-        .container {
+        .main-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        .header {
             background: white;
             border-radius: 20px;
-            padding: 3rem;
+            padding: 2rem;
             box-shadow: 0 20px 40px rgba(0,0,0,0.1);
             text-align: center;
-            max-width: 500px;
-            width: 90%;
+            margin-bottom: 2rem;
         }
         
         .logo {
@@ -182,21 +257,30 @@ app.get("/", (req, res) => {
             margin-bottom: 2rem;
         }
         
-        .endpoints {
-            background: #f8f9fa;
-            border-radius: 10px;
-            padding: 1.5rem;
-            text-align: left;
+        .content-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
         }
         
-        .endpoints h3 {
+        .endpoints, .logs-section {
+            background: white;
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        
+        .endpoints h3, .logs-section h3 {
             color: #333;
             margin-bottom: 1rem;
             font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
         
         .endpoint {
-            background: white;
+            background: #f8f9fa;
             border-radius: 8px;
             padding: 0.8rem;
             margin-bottom: 0.5rem;
@@ -205,10 +289,116 @@ app.get("/", (req, res) => {
             font-size: 0.9rem;
         }
         
+        .logs-container {
+            max-height: 600px;
+            overflow-y: auto;
+            background: #1e1e1e;
+            border-radius: 8px;
+            padding: 1rem;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.85rem;
+            line-height: 1.4;
+        }
+        
+        .log-entry {
+            margin-bottom: 0.5rem;
+            padding: 0.5rem;
+            border-radius: 4px;
+            border-left: 3px solid #666;
+        }
+        
+        .log-entry.info {
+            background: rgba(0, 123, 255, 0.1);
+            border-left-color: #007bff;
+        }
+        
+        .log-entry.warn {
+            background: rgba(255, 193, 7, 0.1);
+            border-left-color: #ffc107;
+        }
+        
+        .log-entry.error {
+            background: rgba(220, 53, 69, 0.1);
+            border-left-color: #dc3545;
+        }
+        
+        .log-entry.debug {
+            background: rgba(108, 117, 125, 0.1);
+            border-left-color: #6c757d;
+        }
+        
+        .log-timestamp {
+            color: #888;
+            font-size: 0.8rem;
+        }
+        
+        .log-level {
+            font-weight: bold;
+            margin: 0 0.5rem;
+        }
+        
+        .log-level.info { color: #007bff; }
+        .log-level.warn { color: #ffc107; }
+        .log-level.error { color: #dc3545; }
+        .log-level.debug { color: #6c757d; }
+        
+        .log-message {
+            color: #e0e0e0;
+        }
+        
+        .log-data {
+            color: #888;
+            font-size: 0.8rem;
+            margin-top: 0.5rem;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        
+        .controls {
+            margin-bottom: 1rem;
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+        
+        .btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: background 0.2s;
+        }
+        
+        .btn:hover {
+            background: #5a6fd8;
+        }
+        
+        .btn.danger {
+            background: #dc3545;
+        }
+        
+        .btn.danger:hover {
+            background: #c82333;
+        }
+        
+        .auto-refresh {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .auto-refresh input {
+            margin: 0;
+        }
+        
         .timestamp {
             color: #999;
             font-size: 0.9rem;
             margin-top: 1rem;
+            text-align: center;
         }
         
         .health-indicator {
@@ -226,49 +416,147 @@ app.get("/", (req, res) => {
             50% { opacity: 0.5; }
             100% { opacity: 1; }
         }
+        
+        @media (max-width: 768px) {
+            .content-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .main-container {
+                padding: 1rem;
+            }
+        }
     </style>
 </head>
     <body>
-        <div class="container">
-            <div class="logo">
-                <img src="/static/logo.svg" alt="Bidi Logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='block'; console.log('Logo failed to load');" onload="console.log('Logo loaded successfully');">
-                <div class="logo-text" style="display: none;">🚀 Bidi Express</div>
+        <div class="main-container">
+            <div class="header">
+                <div class="logo">
+                    <img src="/static/logo.svg" alt="Bidi Logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='block'; console.log('Logo failed to load');" onload="console.log('Logo loaded successfully');">
+                    <div class="logo-text" style="display: none;">🚀 Bidi Express</div>
+                </div>
+                <div class="status">
+                    <span class="health-indicator"></span>
+                    API Server Running
+                </div>
+                <div class="description">
+                    Bidi Express is online and ready to serve requests.
+                </div>
             </div>
-        <div class="status">
-            <span class="health-indicator"></span>
-            API Server Running
-        </div>
-        <div class="description">
-            Bidi Express is online and ready to serve requests.
+            
+            <div class="content-grid">
+                <div class="endpoints">
+                    <h3>🔗 Available Endpoints</h3>
+                    <div class="endpoint">GET /api/health - Health check</div>
+                    <div class="endpoint">GET /api/test - CORS test</div>
+                    <div class="endpoint">GET /api/logs - View server logs</div>
+                    <div class="endpoint">GET /api/business-profiles/:id - Business profiles</div>
+                    <div class="endpoint">POST /trigger-autobid - Production autobidding</div>
+                    <div class="endpoint">POST /api/autobid/generate-sample-bid - AI training</div>
+                    <div class="endpoint">POST /api/autobid/training-feedback - Training feedback</div>
+                    <div class="endpoint">GET /api/autobid/training-data/:id/:category - Training data</div>
+                    <div class="endpoint">GET /api/autobid/training-status/:id - Training status</div>
+                    <div class="endpoint">POST /account_session - Stripe onboarding</div>
+                    <div class="endpoint">POST /account - Stripe account creation</div>
+                    <div class="endpoint">POST /create-checkout-session - Stripe payments</div>
+                    <div class="endpoint">POST /check-payment-status - Payment status</div>
+                    <div class="endpoint">POST /create-login-link - Stripe login</div>
+                    <div class="endpoint">GET /check-account-capabilities/:id - Account capabilities</div>
+                    <div class="endpoint">POST /webhook - Stripe webhooks</div>
+                    <div class="endpoint">POST /api/auth/* - Authentication routes</div>
+                    <div class="endpoint">POST /api/google-calendar/* - Google Calendar integration</div>
+                    <div class="endpoint">POST /api/google-places/* - Google Places integration</div>
+                </div>
+                
+                <div class="logs-section">
+                    <h3>
+                        📊 Server Logs
+                        <span id="log-count">(0 logs)</span>
+                    </h3>
+                    <div class="controls">
+                        <button class="btn" onclick="refreshLogs()">🔄 Refresh</button>
+                        <button class="btn danger" onclick="clearLogs()">🗑️ Clear</button>
+                        <div class="auto-refresh">
+                            <input type="checkbox" id="auto-refresh" onchange="toggleAutoRefresh()">
+                            <label for="auto-refresh">Auto-refresh (5s)</label>
+                        </div>
+                    </div>
+                    <div class="logs-container" id="logs-container">
+                        <div style="color: #888; text-align: center; padding: 2rem;">
+                            Loading logs...
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="timestamp">
+                Last updated: ${new Date().toLocaleString()}
+            </div>
         </div>
         
-        <div class="endpoints">
-            <h3>🔗 Available Endpoints</h3>
-            <div class="endpoint">GET /api/health - Health check</div>
-            <div class="endpoint">GET /api/test - CORS test</div>
-            <div class="endpoint">GET /api/business-profiles/:id - Business profiles</div>
-            <div class="endpoint">POST /trigger-autobid - Production autobidding</div>
-            <div class="endpoint">POST /api/autobid/generate-sample-bid - AI training</div>
-            <div class="endpoint">POST /api/autobid/training-feedback - Training feedback</div>
-            <div class="endpoint">GET /api/autobid/training-data/:id/:category - Training data</div>
-            <div class="endpoint">GET /api/autobid/training-status/:id - Training status</div>
-            <div class="endpoint">POST /account_session - Stripe onboarding</div>
-            <div class="endpoint">POST /account - Stripe account creation</div>
-            <div class="endpoint">POST /create-checkout-session - Stripe payments</div>
-            <div class="endpoint">POST /check-payment-status - Payment status</div>
-            <div class="endpoint">POST /create-login-link - Stripe login</div>
-            <div class="endpoint">GET /check-account-capabilities/:id - Account capabilities</div>
-            <div class="endpoint">POST /webhook - Stripe webhooks</div>
-            <div class="endpoint">POST /api/auth/* - Authentication routes</div>
-            <div class="endpoint">POST /api/google-calendar/* - Google Calendar integration</div>
-            <div class="endpoint">POST /api/google-places/* - Google Places integration</div>
-        </div>
-        
-        <div class="timestamp">
-            Last updated: ${new Date().toLocaleString()}
-        </div>
-    </div>
-</body>
+        <script>
+            let autoRefreshInterval = null;
+            
+            function refreshLogs() {
+                fetch('/api/logs')
+                    .then(response => response.json())
+                    .then(data => {
+                        const container = document.getElementById('logs-container');
+                        const countElement = document.getElementById('log-count');
+                        
+                        countElement.textContent = \`(\${data.logs.length} logs)\`;
+                        
+                        if (data.logs.length === 0) {
+                            container.innerHTML = '<div style="color: #888; text-align: center; padding: 2rem;">No logs available</div>';
+                            return;
+                        }
+                        
+                        container.innerHTML = data.logs.map(log => {
+                            const timestamp = new Date(log.timestamp).toLocaleTimeString();
+                            return \`
+                                <div class="log-entry \${log.level}">
+                                    <span class="log-timestamp">\${timestamp}</span>
+                                    <span class="log-level \${log.level}">[\${log.level.toUpperCase()}]</span>
+                                    <span class="log-message">\${log.message}</span>
+                                    \${log.data ? \`<div class="log-data">\${log.data}</div>\` : ''}
+                                </div>
+                            \`;
+                        }).join('');
+                        
+                        // Auto-scroll to bottom for new logs
+                        container.scrollTop = container.scrollHeight;
+                    })
+                    .catch(error => {
+                        console.error('Error fetching logs:', error);
+                        document.getElementById('logs-container').innerHTML = 
+                            '<div style="color: #dc3545; text-align: center; padding: 2rem;">Error loading logs</div>';
+                    });
+            }
+            
+            function clearLogs() {
+                if (confirm('Are you sure you want to clear all logs?')) {
+                    fetch('/api/logs', { method: 'DELETE' })
+                        .then(() => refreshLogs())
+                        .catch(error => console.error('Error clearing logs:', error));
+                }
+            }
+            
+            function toggleAutoRefresh() {
+                const checkbox = document.getElementById('auto-refresh');
+                if (checkbox.checked) {
+                    autoRefreshInterval = setInterval(refreshLogs, 5000);
+                } else {
+                    if (autoRefreshInterval) {
+                        clearInterval(autoRefreshInterval);
+                        autoRefreshInterval = null;
+                    }
+                }
+            }
+            
+            // Load logs on page load
+            refreshLogs();
+        </script>
+    </body>
 </html>
   `;
   
@@ -291,6 +579,35 @@ app.get("/api/health", (req, res) => {
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development'
   });
+});
+
+// Logs endpoint
+app.get("/api/logs", (req, res) => {
+  const { level, limit = 100 } = req.query;
+  
+  let logs = logStore.logs;
+  
+  // Filter by level if specified
+  if (level) {
+    logs = logs.filter(log => log.level === level);
+  }
+  
+  // Limit results
+  logs = logs.slice(0, parseInt(limit));
+  
+  res.json({
+    logs,
+    total: logStore.logs.length,
+    filtered: logs.length,
+    level: level || 'all'
+  });
+});
+
+// Clear logs endpoint
+app.delete("/api/logs", (req, res) => {
+  logStore.logs = [];
+  logger.info("Logs cleared by user request");
+  res.json({ message: "Logs cleared successfully" });
 });
 
 // This is the endpoint to create an account session for Stripe onboarding
@@ -810,18 +1127,18 @@ app.post("/send-message", async (req, res) => {
 
 // Autobidding API
 app.post('/trigger-autobid', async (req, res) => {
-  console.log("🚀 === TRIGGER-AUTOBID ROUTE STARTED ===");
-  console.log("📋 Request body:", JSON.stringify(req.body, null, 2));
+  logger.info("🚀 === TRIGGER-AUTOBID ROUTE STARTED ===");
+  logger.debug("📋 Request received for ID:", req.body?.request_id || 'unknown');
   
     const { request_id } = req.body;
 
     if (!request_id) {
-      console.log("❌ Missing request_id in request body");
+      logger.error("❌ Missing request_id in request body");
         return res.status(400).json({ error: "Missing required field: request_id." });
     }
 
     try {
-        console.log(`🆕 Auto-bid triggered for Request ID: ${request_id}`);
+        logger.info(`🆕 Auto-bid triggered for Request ID: ${request_id}`);
 
       // Helper function to determine the correct table name based on category
       const getTableNameForCategory = (category) => {
@@ -840,7 +1157,7 @@ app.post('/trigger-autobid', async (req, res) => {
       };
 
       // Fetch request details from the appropriate category table
-      console.log("🔍 Searching for request in category tables...");
+      logger.info("🔍 Searching for request in category tables...");
       let requestData = null;
       let foundCategory = null;
 
@@ -849,11 +1166,11 @@ app.post('/trigger-autobid', async (req, res) => {
       for (const category of categories) {
           const tableName = getTableNameForCategory(category);
           if (!tableName) {
-              console.log(`⚠️ No table mapping found for category: ${category}`);
+              logger.warn(`⚠️ No table mapping found for category: ${category}`);
               continue;
           }
 
-          console.log(`🔍 Checking table: ${tableName}`);
+          logger.debug(`🔍 Checking table: ${tableName}`);
             const { data, error } = await supabase
               .from(tableName)
                 .select("*")
@@ -861,26 +1178,26 @@ app.post('/trigger-autobid', async (req, res) => {
                 .single();
 
           if (error) {
-              console.log(`❌ Error querying ${tableName}:`, error.message);
+              logger.warn(`❌ Error querying ${tableName}:`, error.message);
           } else if (data) {
-              console.log(`✅ Found request in ${tableName}`);
+              logger.info(`✅ Found request in ${tableName}`);
               requestData = data;
               foundCategory = category;
                 break;
           } else {
-              console.log(`📭 No data found in ${tableName}`);
+              logger.debug(`📭 No data found in ${tableName}`);
           }
       }
 
       if (!requestData || !foundCategory) {
-          console.error(`❌ Request not found in any category table for ID: ${request_id}`);
+          logger.error(`❌ Request not found in any category table for ID: ${request_id}`);
           return res.status(404).json({ error: "Request not found." });
       }
 
-      console.log(`🔍 Retrieved request details from ${foundCategory} table:`, JSON.stringify(requestData, null, 2));
+      logger.debug(`🔍 Retrieved request from ${foundCategory} table`);
 
       // Create standardized request details for the generateAutoBidForBusiness function
-      console.log("📝 Creating standardized request details...");
+      logger.info("📝 Creating standardized request details...");
       const requestDetails = {
           id: requestData.id,
           service_category: foundCategory,
@@ -965,21 +1282,21 @@ app.post('/trigger-autobid', async (req, res) => {
           })
       };
 
-      console.log("📋 Standardized request details:", JSON.stringify(requestDetails, null, 2));
+      logger.debug("📋 Request details sanitized for category:", requestDetails.service_category);
 
       // Find businesses with Auto-Bidding enabled
-      console.log("🏢 Fetching businesses with auto-bidding enabled...");
+      logger.info("🏢 Fetching businesses with auto-bidding enabled...");
         const { data: autoBidBusinesses, error: businessError } = await supabase
             .from("business_profiles")
           .select("id, autobid_enabled, business_category")
             .eq("autobid_enabled", true);
 
         if (businessError) {
-            console.error("❌ Error fetching businesses:", businessError.message);
+            logger.error("❌ Error fetching businesses:", businessError.message);
             return res.status(500).json({ error: "Failed to fetch businesses." });
         }
 
-      console.log(`📊 Found ${autoBidBusinesses?.length || 0} businesses with auto-bidding enabled`);
+      logger.info(`📊 Found ${autoBidBusinesses?.length || 0} businesses with auto-bidding enabled`);
 
       // Filter businesses to only include those whose category matches the request's category
       const eligibleBusinesses = autoBidBusinesses.filter(business => {
@@ -988,45 +1305,40 @@ app.post('/trigger-autobid', async (req, res) => {
           : [business.business_category?.toLowerCase() || ''];
         const requestCategory = requestDetails.service_category.toLowerCase();
         
-        console.log(`🔍 Business categories:`, businessCategories);
-        console.log(`🔍 Request category: "${requestCategory}"`);
-        console.log(`🔍 Business ${business.id} categories:`, businessCategories);
+        logger.debug(`🔍 Business ${business.id} categories: ${businessCategories.join(', ')}`);
         
         return businessCategories.includes(requestCategory);
         });
 
-        console.log(`🔍 Found ${eligibleBusinesses.length} eligible businesses for category: ${requestDetails.service_category}`);
-      console.log("🏢 Eligible businesses:", JSON.stringify(eligibleBusinesses, null, 2));
+        logger.info(`🔍 Found ${eligibleBusinesses.length} eligible businesses for category: ${requestDetails.service_category}`);
+      logger.debug(`🏢 Found ${eligibleBusinesses.length} eligible businesses`);
 
         let bidsGenerated = [];
 
         for (const business of eligibleBusinesses) {
-        console.log(`🤖 Generating auto-bid for business: ${business.id}`);
+        logger.info(`🤖 Generating auto-bid for business: ${business.id}`);
                 const autoBid = await generateAutoBidForBusiness(business.id, requestDetails);
                 if (autoBid) {
-                    console.log(`✅ Auto-bid generated for Business ${business.id}:`, autoBid);
+                    logger.info(`✅ Auto-bid generated for Business ${business.id}:`, autoBid);
                     bidsGenerated.push({
                         business_id: business.id,
                         bid_amount: autoBid.bidAmount,
                         bid_description: autoBid.bidDescription,
             });
         } else {
-            console.log(`❌ Failed to generate auto-bid for Business ${business.id}`);
+            logger.error(`❌ Failed to generate auto-bid for Business ${business.id}`);
         }
       }
 
-      console.log("✅ === TRIGGER-AUTOBID ROUTE COMPLETED SUCCESSFULLY ===");
+      logger.info("✅ === TRIGGER-AUTOBID ROUTE COMPLETED SUCCESSFULLY ===");
       res.status(200).json({
           message: "Auto-bids generated successfully (LOG ONLY, NO INSERTION)",
           bids: bidsGenerated,
       });
 
             } catch (error) {
-      console.error("❌ === TRIGGER-AUTOBID ROUTE FAILED ===");
-      console.error("Error details:", error);
-      console.error("Error message:", error.message);
-      console.error("Error stack:", error.stack);
-      console.error("=== END ERROR LOG ===");
+          logger.error("❌ === TRIGGER-AUTOBID ROUTE FAILED ===");
+    logger.error("Error message:", error.message);
       res.status(500).json({ error: "Failed to trigger auto-bid.", details: error.message });
   }
 });
@@ -1066,8 +1378,8 @@ function isDuplicateRequest(businessId, category, requestData) {
 
 // 1. AI Bid Generation Endpoint for Training
 app.post('/api/autobid/generate-sample-bid', async (req, res) => {
-  console.log("🚀 === GENERATE SAMPLE BID ROUTE STARTED ===");
-  console.log("📋 Request body:", JSON.stringify(req.body, null, 2));
+  logger.info("🚀 === GENERATE SAMPLE BID ROUTE STARTED ===");
+  logger.debug("📋 Sample bid request for business:", req.body?.business_id || 'unknown');
   
   try {
     const { business_id, category, sample_request, request_data } = req.body;
@@ -1076,12 +1388,12 @@ app.post('/api/autobid/generate-sample-bid', async (req, res) => {
     const actualRequest = sample_request || request_data;
     
     if (!business_id || !category || !actualRequest) {
-      console.log("❌ Missing required fields:");
-      console.log("  - business_id:", business_id);
-      console.log("  - category:", category);
-      console.log("  - sample_request:", sample_request);
-      console.log("  - request_data:", request_data);
-      console.log("  - actualRequest:", actualRequest);
+      logger.error("❌ Missing required fields:");
+      logger.error("  - business_id:", business_id);
+      logger.error("  - category:", category);
+      logger.error("  - sample_request:", sample_request);
+      logger.error("  - request_data:", request_data);
+      logger.error("  - actualRequest:", actualRequest);
       
       return res.status(400).json({ 
         error: "Missing required fields: business_id, category, and either sample_request or request_data" 
@@ -1090,21 +1402,21 @@ app.post('/api/autobid/generate-sample-bid', async (req, res) => {
 
     // Check for duplicate requests
     if (isDuplicateRequest(business_id, category, actualRequest)) {
-      console.log("⚠️ Duplicate request detected, returning cached response");
+      logger.warn("⚠️ Duplicate request detected, returning cached response");
       return res.status(429).json({ 
         error: "Duplicate request detected. Please wait a moment before trying again." 
       });
     }
 
-    console.log(`🤖 Generating AI sample bid for Business ${business_id}, Category: ${category}`);
+    logger.info(`🤖 Generating AI sample bid for Business ${business_id}, Category: ${category}`);
 
     // 1. Fetch business training data
     const trainingData = await getBusinessTrainingData(business_id, category);
-    console.log(`📊 Retrieved ${trainingData.responses?.length || 0} training responses`);
+    logger.info(`📊 Retrieved ${trainingData.responses?.length || 0} training responses`);
 
     // 2. Generate AI bid using training data and pricing rules
     const generatedBid = await generateAIBidForTraining(trainingData, actualRequest, category, business_id);
-    console.log("✅ AI bid generated:", generatedBid);
+    logger.info("✅ AI bid generated:", generatedBid);
 
     // 3. Store AI bid in database
     // Get a random existing training request for this category to avoid always using the same one
@@ -1112,19 +1424,19 @@ app.post('/api/autobid/generate-sample-bid', async (req, res) => {
     
     // If no request_id provided, get a random training request for this category
     if (!requestId) {
-      console.log("🔍 Looking for training requests with category:", category);
+      logger.info("🔍 Looking for training requests with category:", category);
       const { data: trainingRequests, error: trainingError } = await supabase
         .from('autobid_training_requests')
         .select('id')
         .eq('category', category);
 
       if (trainingError) {
-        console.error("❌ Error fetching training requests:", trainingError);
+        logger.error("❌ Error fetching training requests:", trainingError);
         return res.status(500).json({ error: "Failed to fetch training requests" });
       }
 
       if (!trainingRequests || trainingRequests.length === 0) {
-        console.log("❌ No training requests available for category:", category);
+        logger.error("❌ No training requests available for category:", category);
         return res.status(404).json({ error: "No training requests available for this category" });
       }
 
@@ -1137,11 +1449,11 @@ app.post('/api/autobid/generate-sample-bid', async (req, res) => {
       const selectedIndex = Math.abs(hashValue) % trainingRequests.length;
       requestId = trainingRequests[selectedIndex].id;
       
-      console.log(`✅ Using deterministic training request with ID: ${requestId} (${selectedIndex + 1}/${trainingRequests.length})`);
+      logger.info(`✅ Using deterministic training request with ID: ${requestId} (${selectedIndex + 1}/${trainingRequests.length})`);
     }
 
     const aiResponse = await storeAIBid(business_id, requestId, generatedBid, category);
-    console.log("💾 AI bid stored with ID:", aiResponse.id);
+    logger.info("💾 AI bid stored with ID:", aiResponse.id);
 
     res.json({
       success: true,
@@ -1154,8 +1466,8 @@ app.post('/api/autobid/generate-sample-bid', async (req, res) => {
         });
 
     } catch (error) {
-    console.error("❌ === GENERATE SAMPLE BID ROUTE FAILED ===");
-    console.error("Error details:", error);
+    logger.error("❌ === GENERATE SAMPLE BID ROUTE FAILED ===");
+    logger.error("Error message:", error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -1169,11 +1481,11 @@ app.post('/api/autobid/generate-sample-bid', async (req, res) => {
 
 // 2. Training Data Retrieval Endpoint
 app.get('/api/autobid/training-data/:business_id/:category', async (req, res) => {
-  console.log("📊 === TRAINING DATA RETRIEVAL ROUTE STARTED ===");
+  logger.info("📊 === TRAINING DATA RETRIEVAL ROUTE STARTED ===");
   
   try {
     const { business_id, category } = req.params;
-    console.log(`📋 Fetching training data for Business ${business_id}, Category: ${category}`);
+    logger.info(`📋 Fetching training data for Business ${business_id}, Category: ${category}`);
 
     const trainingData = await getBusinessTrainingData(business_id, category);
     
@@ -1184,7 +1496,7 @@ app.get('/api/autobid/training-data/:business_id/:category', async (req, res) =>
         });
 
     } catch (error) {
-    console.error("❌ Error retrieving training data:", error);
+    logger.error("❌ Error retrieving training data:", error);
     res.status(500).json({ error: error.message });
   }
 });
