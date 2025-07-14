@@ -1102,8 +1102,8 @@ app.post('/api/autobid/generate-sample-bid', async (req, res) => {
     const trainingData = await getBusinessTrainingData(business_id, category);
     console.log(`📊 Retrieved ${trainingData.responses?.length || 0} training responses`);
 
-    // 2. Generate AI bid using training data
-    const generatedBid = await generateAIBidForTraining(trainingData, actualRequest, category);
+    // 2. Generate AI bid using training data and pricing rules
+    const generatedBid = await generateAIBidForTraining(trainingData, actualRequest, category, business_id);
     console.log("✅ AI bid generated:", generatedBid);
 
     // 3. Store AI bid in database
@@ -1500,8 +1500,22 @@ async function getBusinessTrainingData(businessId, category) {
   return { responses: responses || [], feedback: feedback || [] };
 }
 
-async function generateAIBidForTraining(trainingData, sampleRequest, category) {
+async function generateAIBidForTraining(trainingData, sampleRequest, category, businessId) {
   console.log(`🤖 Generating AI bid for training with ${trainingData.responses.length} responses`);
+
+  // Fetch business pricing rules for training
+  console.log(`🔍 Fetching pricing rules for Business ${businessId}`);
+  const { data: pricingRules, error: pricingError } = await supabase
+    .from("business_pricing_rules")
+    .select("*")
+    .eq("business_id", businessId)
+    .single();
+
+  if (pricingError) {
+    console.warn("⚠️ No explicit pricing rules found for Business ID:", businessId);
+  } else {
+    console.log("✅ Found pricing rules for business:", pricingRules);
+  }
 
   // Process training data for AI
   const processedData = processTrainingDataForAI(trainingData);
@@ -1513,8 +1527,8 @@ async function generateAIBidForTraining(trainingData, sampleRequest, category) {
   console.log("  - Specific Feedback:", processedData.feedback_preferences.specific_feedback.slice(0, 2));
   console.log("  - Preferred Improvements:", processedData.feedback_preferences.preferred_improvements.slice(0, 2));
   
-  // Create AI prompt with training data
-  const prompt = createTrainingAIPrompt(processedData, sampleRequest, category);
+  // Create AI prompt with training data AND pricing rules
+  const prompt = createTrainingAIPrompt(processedData, sampleRequest, category, pricingRules);
   
   console.log("📜 Training AI Prompt:", prompt);
 
@@ -1541,9 +1555,13 @@ async function generateAIBidForTraining(trainingData, sampleRequest, category) {
     throw new Error(`Failed to parse AI response: ${error.message}`);
   }
 
+  // Validate and adjust pricing using business rules (same as production)
+  const validatedBid = validateAndAdjustPricingForTraining(aiBid, pricingRules, trainingData);
+  console.log(`💰 Final validated training bid: $${validatedBid.bidAmount}`);
+
   return {
-    amount: aiBid.bidAmount || aiBid.amount,
-    description: aiBid.bidDescription || aiBid.description,
+    amount: validatedBid.bidAmount,
+    description: validatedBid.bidDescription,
     breakdown: aiBid.breakdown || aiBid.pricingBreakdown || "",
     reasoning: aiBid.reasoning || aiBid.pricingReasoning || ""
   };
@@ -1854,7 +1872,7 @@ function extractServicePreferences(responses) {
   return [...new Set(preferences)];
 }
 
-function createTrainingAIPrompt(processedData, sampleRequest, category) {
+function createTrainingAIPrompt(processedData, sampleRequest, category, pricingRules) {
   const categoryHandlers = {
     photography: {
       pricingFactors: "hourly rates, coverage duration, deliverables, equipment needs, post-production time",
@@ -1888,35 +1906,98 @@ function createTrainingAIPrompt(processedData, sampleRequest, category) {
 
   const categoryInfo = categoryHandlers[category] || categoryHandlers.photography;
 
-  // Calculate a more dynamic base price based on the specific request
-  let basePrice = processedData.business_patterns.average_bid_amount;
+  // Format pricing rules for AI consumption
+  const formatPricingRules = (rules) => {
+    if (!rules) return "No pricing rules configured";
+    
+    return `
+**PRICING RULES CONFIGURATION:**
+- **Base Price:** $${rules.base_price || 'Not set'}
+- **Min Price:** $${rules.min_price || 'No limit'}
+- **Max Price:** $${rules.max_price || 'No limit'}
+- **Pricing Model:** ${rules.pricing_model || 'Not specified'}
+- **Hourly Rate:** $${rules.hourly_rate || 'Not set'}
+- **Per Person Rate:** $${rules.per_person_rate || 'Not set'}
+- **Wedding Premium:** ${rules.wedding_premium ? `$${rules.wedding_premium}` : 'Not set'}
+- **Travel Fee:** $${rules.travel_fee_per_mile || 'Not set'} per mile
+- **Rush Fee:** ${rules.rush_fee_percentage || 'Not set'}%
+- **Deposit:** ${rules.deposit_percentage || 'Not set'}%
+- **Min/Max Guests:** ${rules.minimum_guests || 'No limit'} - ${rules.maximum_guests || 'No limit'}
+- **Bid Aggressiveness:** ${rules.bid_aggressiveness || 'Not specified'}
+- **Accept Unknowns:** ${rules.accept_unknowns ? 'Yes' : 'No'}
+
+**DURATION MULTIPLIERS:** ${rules.duration_multipliers ? JSON.stringify(rules.duration_multipliers) : 'Not configured'}
+**SERVICE ADDONS:** ${rules.service_addons ? JSON.stringify(rules.service_addons) : 'Not configured'}
+**SEASONAL PRICING:** ${rules.seasonal_pricing ? JSON.stringify(rules.seasonal_pricing) : 'Not configured'}
+**GROUP DISCOUNTS:** ${rules.group_discounts ? JSON.stringify(rules.group_discounts) : 'Not configured'}
+**PACKAGE DISCOUNTS:** ${rules.package_discounts ? JSON.stringify(rules.package_discounts) : 'Not configured'}
+**CUSTOM PRICING RULES:** ${rules.custom_pricing_rules ? JSON.stringify(rules.custom_pricing_rules) : 'Not configured'}
+
+**DEFAULT MESSAGE:** ${rules.default_message || 'Not set'}
+**ADDITIONAL COMMENTS:** ${rules.additional_comments || 'None'}
+**ADDITIONAL NOTES:** ${rules.additional_notes || 'None'}
+**PRICING PACKAGES:** ${rules.pricing_packages || 'Not specified'}
+**BLOCKLIST KEYWORDS:** ${rules.blocklist_keywords ? JSON.stringify(rules.blocklist_keywords) : 'None'}`;
+  };
+
+  // Calculate base price using business pricing rules (PRIMARY) or training data (FALLBACK)
+  let basePrice;
   const requestDuration = sampleRequest.duration;
   const guestCount = sampleRequest.guest_count || 1;
   const eventType = sampleRequest.event_type;
   
-  // Adjust pricing based on request specifics
-  if (requestDuration) {
-    const hours = parseInt(requestDuration.match(/(\d+)/)?.[1] || 1);
-    if (hours > 1) {
-      basePrice = basePrice * (hours / 3); // Normalize to 3-hour baseline
+  if (pricingRules && pricingRules.base_price) {
+    // Use business pricing rules as primary foundation
+    basePrice = parseFloat(pricingRules.base_price);
+    console.log(`💰 Using business base price: $${basePrice}`);
+    
+    // Apply business-specific adjustments
+    if (pricingRules.hourly_rate && requestDuration) {
+      const hours = parseInt(requestDuration.match(/(\d+)/)?.[1] || 1);
+      basePrice = parseFloat(pricingRules.hourly_rate) * hours;
+      console.log(`⏰ Applied hourly rate: $${pricingRules.hourly_rate} × ${hours} hours = $${basePrice}`);
+    }
+    
+    if (pricingRules.per_person_rate && guestCount > 1) {
+      basePrice = parseFloat(pricingRules.per_person_rate) * guestCount;
+      console.log(`👥 Applied per-person rate: $${pricingRules.per_person_rate} × ${guestCount} people = $${basePrice}`);
+    }
+    
+    if (pricingRules.wedding_premium && eventType === 'wedding') {
+      basePrice += parseFloat(pricingRules.wedding_premium);
+      console.log(`💒 Added wedding premium: +$${pricingRules.wedding_premium} = $${basePrice}`);
+    }
+  } else {
+    // Fallback to training data average
+    basePrice = processedData.business_patterns.average_bid_amount;
+    console.log(`⚠️ No pricing rules found, using training average: $${basePrice}`);
+    
+    // Apply basic adjustments to training average
+    if (requestDuration) {
+      const hours = parseInt(requestDuration.match(/(\d+)/)?.[1] || 1);
+      if (hours > 1) {
+        basePrice = basePrice * (hours / 3); // Normalize to 3-hour baseline
+      }
+    }
+    
+    if (eventType === 'wedding') {
+      basePrice = basePrice * 1.5; // Weddings are more complex
+    } else if (eventType === 'engagement') {
+      basePrice = basePrice * 0.8; // Engagements are simpler
     }
   }
   
-  // Adjust for event type complexity
-  if (eventType === 'wedding') {
-    basePrice = basePrice * 1.5; // Weddings are more complex
-  } else if (eventType === 'engagement') {
-    basePrice = basePrice * 0.8; // Engagements are simpler
-  }
-  
   // Add some randomness to avoid always getting the same price
-  const variation = 0.95 + (Math.random() * 0.1); // ±5% variation instead of ±10%
+  const variation = 0.95 + (Math.random() * 0.1); // ±5% variation
   basePrice = Math.round(basePrice * variation);
 
   return `
-You are an AI assistant that generates personalized bids for ${category} services based on a business's training data and feedback.
+You are an AI assistant that generates personalized bids for ${category} services based on a business's pricing rules, training data, and feedback.
 
-### BUSINESS TRAINING PATTERNS:
+### BUSINESS PRICING RULES (PRIMARY FOUNDATION):
+${formatPricingRules(pricingRules)}
+
+### BUSINESS TRAINING PATTERNS (ENHANCEMENT DATA):
 - **Training Bid Range:** $${Math.min(...processedData.responses?.map(r => r.bid_amount) || [0])} - $${Math.max(...processedData.responses?.map(r => r.bid_amount) || [0])}
 - **Average Training Bid:** $${processedData.business_patterns.average_bid_amount.toFixed(2)}
 - **Pricing Strategy:** ${Object.entries(processedData.pricing_strategy).filter(([k,v]) => v).map(([k,v]) => k.replace('_', ' ')).join(', ')}
@@ -1933,11 +2014,11 @@ You are an AI assistant that generates personalized bids for ${category} service
 
 ### PRICING ADJUSTMENT INSTRUCTIONS:
 ${processedData.feedback_preferences.pricing_adjustments.includes('reduce_pricing') ? 
-  '⚠️ CRITICAL: Previous feedback indicates pricing was TOO HIGH. Reduce your bid amount by 15-25% from the training average.' : ''}
+  '⚠️ CRITICAL: Previous feedback indicates pricing was TOO HIGH. Reduce your bid amount by 15-25% from the business base price.' : ''}
 ${processedData.feedback_preferences.pricing_adjustments.includes('increase_pricing') ? 
-  '⚠️ CRITICAL: Previous feedback indicates pricing was TOO LOW. Increase your bid amount by 15-25% from the training average.' : ''}
+  '⚠️ CRITICAL: Previous feedback indicates pricing was TOO LOW. Increase your bid amount by 15-25% from the business base price.' : ''}
 ${processedData.feedback_preferences.pricing_adjustments.length === 0 ? 
-  '✅ No major pricing issues identified in feedback. Use training average as baseline.' : ''}
+  '✅ No major pricing issues identified in feedback. Use business pricing rules as baseline.' : ''}
 
 ### SPECIFIC REQUEST ANALYSIS:
 - **Duration:** ${sampleRequest.duration}
@@ -1951,22 +2032,48 @@ ${processedData.feedback_preferences.pricing_adjustments.length === 0 ?
 - **Pricing Factors:** ${categoryInfo.pricingFactors}
 - **Service Types:** ${categoryInfo.serviceTypes}
 
-### INSTRUCTIONS:
-Generate a bid that matches this business's style and pricing patterns. CRITICAL REQUIREMENTS:
+### PRICING CALCULATION INSTRUCTIONS (CRITICAL):
+**PRIMARY PRICING FOUNDATION:** Use the business's explicit pricing rules as your starting point, NOT training averages.
 
-1. **PRICING ADJUSTMENT:** ${processedData.feedback_preferences.pricing_adjustments.includes('reduce_pricing') ? 
-    'REDUCE pricing by 15-25% from training average due to previous "too high" feedback' : 
-    processedData.feedback_preferences.pricing_adjustments.includes('increase_pricing') ? 
-    'INCREASE pricing by 15-25% from training average due to previous "too low" feedback' : 
-    'Use training average as baseline with normal variation'}
+1. **START WITH BUSINESS BASE PRICE:** $${pricingRules?.base_price || 'Calculate from pricing model'}
+2. **APPLY PRICING MODEL:**
+   - If hourly_rate is set: Base Price = Hourly Rate × Event Duration
+   - If per_person_rate is set: Base Price = Per Person Rate × Guest Count
+   - If base_price is set: Use as starting point
+   - Otherwise: Use training average as fallback
 
-2. **AVOID THESE ISSUES:** ${processedData.feedback_preferences.common_issues.join(', ') || 'none'}
+3. **APPLY BUSINESS-SPECIFIC ADJUSTMENTS:**
+   - **Wedding Premium:** ${pricingRules?.wedding_premium ? `Add $${pricingRules.wedding_premium} for weddings` : 'No wedding premium'}
+   - **Duration Multipliers:** ${pricingRules?.duration_multipliers ? `Apply: ${JSON.stringify(pricingRules.duration_multipliers)}` : 'No duration multipliers'}
+   - **Service Addons:** ${pricingRules?.service_addons ? `Include: ${JSON.stringify(pricingRules.service_addons)}` : 'No service addons'}
+   - **Seasonal Pricing:** ${pricingRules?.seasonal_pricing ? `Apply: ${JSON.stringify(pricingRules.seasonal_pricing)}` : 'No seasonal pricing'}
+   - **Group Discounts:** ${pricingRules?.group_discounts ? `Apply: ${JSON.stringify(pricingRules.group_discounts)}` : 'No group discounts'}
+   - **Travel Fee:** ${pricingRules?.travel_fee_per_mile ? `Add $${pricingRules.travel_fee_per_mile} per mile` : 'No travel fee'}
+   - **Rush Fee:** ${pricingRules?.rush_fee_percentage ? `Add ${pricingRules.rush_fee_percentage}% for rush orders` : 'No rush fee'}
 
-3. **INCORPORATE THESE IMPROVEMENTS:** ${processedData.feedback_preferences.preferred_improvements.slice(0, 2).join(' | ') || 'none'}
+4. **RESPECT BUSINESS CONSTRAINTS:**
+   - Minimum Price: $${pricingRules?.min_price || 'No limit'}
+   - Maximum Price: $${pricingRules?.max_price || 'No limit'}
+   - Bid Aggressiveness: ${pricingRules?.bid_aggressiveness || 'Not specified'}
 
-4. **Consider the specific request details** (duration, event type, guest count, location, requirements)
+5. **APPLY FEEDBACK ADJUSTMENTS:**
+   ${processedData.feedback_preferences.pricing_adjustments.includes('reduce_pricing') ? 
+     '⚠️ REDUCE pricing by 15-25% due to previous "too high" feedback' : ''}
+   ${processedData.feedback_preferences.pricing_adjustments.includes('increase_pricing') ? 
+     '⚠️ INCREASE pricing by 15-25% due to previous "too low" feedback' : ''}
 
-5. **Stay within the business's training bid range** but apply feedback-based adjustments
+6. **FINAL VALIDATION:**
+   - Ensure price is within business min/max constraints
+   - Ensure price is reasonable ($50-$50k range)
+   - Match business's bid aggressiveness level
+
+### TRAINING DATA INTEGRATION:
+Use the business's training patterns to enhance your bid (but don't override pricing rules):
+1. **Follow their pricing strategy** - Use their preferred pricing approach
+2. **Emphasize their preferred services** - Highlight services they typically include
+3. **Match their description style** - Use their preferred level of detail
+4. **AVOID THESE ISSUES:** ${processedData.feedback_preferences.common_issues.join(', ') || 'none'}
+5. **INCORPORATE THESE IMPROVEMENTS:** ${processedData.feedback_preferences.preferred_improvements.slice(0, 2).join(' | ') || 'none'}
 
 ### RETURN JSON FORMAT ONLY:
 \`\`\`json
@@ -2036,6 +2143,80 @@ if (process.env.NODE_ENV !== "production") {
   server.listen(5000, () => {
     console.log("Node server listening on port 4242 with Socket.IO enabled! Visit http://localhost:5000");
   });
+}
+
+// Pricing validation and adjustment function for training (same logic as production)
+function validateAndAdjustPricingForTraining(aiBid, pricingRules, trainingData) {
+    let adjustedBid = { ...aiBid };
+    const bidAmount = parseFloat(aiBid.bidAmount || aiBid.amount);
+    
+    console.log(`🔍 Validating training bid amount: $${bidAmount}`);
+    
+    // PRIMARY: Apply business pricing constraints (highest priority)
+    if (pricingRules) {
+        const minPrice = parseFloat(pricingRules.min_price);
+        const maxPrice = parseFloat(pricingRules.max_price);
+        
+        if (!isNaN(minPrice) && bidAmount < minPrice) {
+            console.log(`⚠️ Training bid $${bidAmount} below business minimum $${minPrice}, adjusting up`);
+            adjustedBid.bidAmount = minPrice;
+        }
+        
+        if (!isNaN(maxPrice) && bidAmount > maxPrice) {
+            console.log(`⚠️ Training bid $${bidAmount} above business maximum $${maxPrice}, adjusting down`);
+            adjustedBid.bidAmount = maxPrice;
+        }
+        
+        // Apply business-specific pricing adjustments
+        if (pricingRules.base_price && !isNaN(pricingRules.base_price)) {
+            const basePrice = parseFloat(pricingRules.base_price);
+            console.log(`💰 Business base price: $${basePrice}`);
+            
+            // If the AI bid is significantly different from base price, consider adjusting
+            const basePriceVariance = 0.3; // Allow 30% variance from base price
+            const minBasePrice = basePrice * (1 - basePriceVariance);
+            const maxBasePrice = basePrice * (1 + basePriceVariance);
+            
+            if (adjustedBid.bidAmount < minBasePrice) {
+                console.log(`⚠️ Training bid $${adjustedBid.bidAmount} significantly below base price $${basePrice}, adjusting up`);
+                adjustedBid.bidAmount = Math.round(minBasePrice);
+            }
+            
+            if (adjustedBid.bidAmount > maxBasePrice) {
+                console.log(`⚠️ Training bid $${adjustedBid.bidAmount} significantly above base price $${basePrice}, adjusting down`);
+                adjustedBid.bidAmount = Math.round(maxBasePrice);
+            }
+        }
+    }
+    
+    // SECONDARY: Apply training data insights (only if no business rules or as validation)
+    if (trainingData.responses && trainingData.responses.length > 0 && (!pricingRules || !pricingRules.base_price)) {
+        const avgTrainingBid = trainingData.responses.reduce((sum, r) => sum + parseFloat(r.bid_amount), 0) / trainingData.responses.length;
+        const trainingVariance = 0.2; // Allow 20% variance from training average
+        
+        const minTrainingPrice = avgTrainingBid * (1 - trainingVariance);
+        const maxTrainingPrice = avgTrainingBid * (1 + trainingVariance);
+        
+        if (adjustedBid.bidAmount < minTrainingPrice) {
+            console.log(`⚠️ Training bid $${adjustedBid.bidAmount} below training minimum $${minTrainingPrice.toFixed(2)}, adjusting up`);
+            adjustedBid.bidAmount = Math.round(minTrainingPrice);
+        }
+        
+        if (adjustedBid.bidAmount > maxTrainingPrice) {
+            console.log(`⚠️ Training bid $${adjustedBid.bidAmount} above training maximum $${maxTrainingPrice.toFixed(2)}, adjusting down`);
+            adjustedBid.bidAmount = Math.round(maxTrainingPrice);
+        }
+    }
+    
+    // TERTIARY: Ensure bid is a reasonable amount (not too low or too high)
+    const finalAmount = Math.max(50, Math.min(50000, adjustedBid.bidAmount)); // $50-$50k range
+    if (finalAmount !== adjustedBid.bidAmount) {
+        console.log(`⚠️ Training bid adjusted to reasonable range: $${finalAmount}`);
+        adjustedBid.bidAmount = finalAmount;
+    }
+    
+    console.log(`✅ Final validated training bid amount: $${adjustedBid.bidAmount}`);
+    return adjustedBid;
 }
 
 // Add error handling middleware
