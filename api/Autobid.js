@@ -461,7 +461,69 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             console.warn("⚠️ No explicit pricing rules found for Business ID:", businessId, "Category:", requestDetails.service_category);
         }
 
-        // Step 3.5: Retrieve the business's packages
+        // Step 3.1: Check dealbreakers before proceeding
+        if (pricingRules) {
+            const dealbreakerCheck = checkDealbreakers(requestDetails, pricingRules);
+            if (!dealbreakerCheck.allowed) {
+                console.log(`❌ Request violates dealbreakers: ${dealbreakerCheck.violations.join(', ')}`);
+                return null; // Auto-decline
+            }
+        }
+
+        // Step 3.2: Get business location for travel calculations
+        const { data: businessProfile, error: businessError } = await supabase
+            .from("businesses")
+            .select("location")
+            .eq("id", businessId)
+            .single();
+
+        if (businessError) {
+            console.warn("⚠️ Could not fetch business location for travel calculations");
+        }
+
+        // Step 3.3: Calculate travel fees
+        let travelFees = { fee: 0, warning: null };
+        if (pricingRules?.travel_config && businessProfile?.location && requestDetails.location) {
+            travelFees = calculateTravelFees(
+                businessProfile.location,
+                requestDetails.location,
+                pricingRules.travel_config
+            );
+            console.log(`🚗 Travel fees calculated: $${travelFees.fee}, Warning: ${travelFees.warning}`);
+        }
+
+        // Step 3.4: Calculate base price using new pricing logic
+        let basePrice = 0;
+        if (pricingRules) {
+            // Use new category-specific pricing
+            basePrice = calculateCategoryPricing(requestDetails, pricingRules);
+            
+            // Apply duration-based pricing if applicable (e.g., DJs)
+            if (pricingRules.hourly_tiers && requestDetails.duration) {
+                basePrice = calculateDurationPricing(requestDetails.duration, pricingRules);
+            }
+            
+            // Apply seasonal pricing
+            if (requestDetails.start_date) {
+                basePrice = applySeasonalPricing(basePrice, requestDetails.start_date, pricingRules.seasonal_pricing);
+            }
+            
+            console.log(`💰 Base price calculated: $${basePrice}`);
+        } else {
+            // Fallback to old logic
+            basePrice = 1000; // Default fallback
+            console.log(`⚠️ No pricing rules, using fallback base price: $${basePrice}`);
+        }
+
+        // Step 3.5: Apply platform markup
+        let finalPrice = basePrice + travelFees.fee;
+        if (pricingRules?.platform_markup) {
+            const markup = finalPrice * (pricingRules.platform_markup / 100);
+            finalPrice += markup;
+            console.log(`📈 Applied platform markup: +$${markup.toFixed(2)} = $${finalPrice}`);
+        }
+
+        // Step 3.6: Retrieve the business's packages
         const { data: businessPackages, error: packagesError } = await supabase
             .from("business_packages")
             .select("*")
@@ -485,7 +547,7 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
 
         if (!handler) {
             console.error(`❌ No handler found for category: ${category}`);
-            return null;
+                return null;
         }
 
         // Step 6: Format request data and bid history using category-specific logic
@@ -503,7 +565,13 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
             pricingRules,
             formattedBidHistory,
             trainingData,
-            businessPackages
+            businessPackages,
+            {
+                basePrice,
+                travelFees,
+                finalPrice,
+                dealbreakerCheck: pricingRules ? checkDealbreakers(requestDetails, pricingRules) : { allowed: true, violations: [] }
+            }
         );
 
         // Step 8: Use OpenAI to Generate the Bid
@@ -533,7 +601,11 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
 
         // Step 8.5: Validate and adjust pricing based on business constraints
         aiBid = validateAndAdjustPricing(aiBid, pricingRules, trainingData);
-        console.log(`💰 Final adjusted bid: $${aiBid.bidAmount}`);
+        
+        // Use the calculated final price instead of AI-generated price
+        aiBid.bidAmount = context.finalPrice;
+        
+        console.log(`💰 Final calculated bid: $${aiBid.bidAmount}`);
 
         // Step 9: Determine Bid Category
         const bidCategory = ["photography", "videography"].includes(category) 
@@ -610,7 +682,7 @@ async function getBusinessTrainingData(businessId, category) {
 }
 
 // Enhanced AI prompt function that incorporates training data
-const getEnhancedCategorySpecificPrompt = (category, requestData, pricingRules, bidHistory, trainingData, businessPackages) => {
+const getEnhancedCategorySpecificPrompt = (category, requestData, pricingRules, bidHistory, trainingData, businessPackages, context) => {
     // Process training data for AI
     const processedTrainingData = processTrainingDataForAI(trainingData);
     
@@ -693,6 +765,15 @@ const getEnhancedCategorySpecificPrompt = (category, requestData, pricingRules, 
         ### **BUSINESS PACKAGES (AVAILABLE OPTIONS)**
         ${formatBusinessPackages(businessPackages)}
 
+        ### **CALCULATED PRICING BREAKDOWN:**
+        - **Base Price:** $${context.basePrice}
+        - **Travel Fees:** $${context.travelFees.fee}${context.travelFees.warning ? ` (${context.travelFees.warning})` : ''}
+        - **Platform Markup:** ${pricingRules?.platform_markup ? `${pricingRules.platform_markup}%` : 'None'}
+        - **Final Price:** $${context.finalPrice}
+
+        ### **CONSULTATION REQUIREMENTS:**
+        ${pricingRules?.consultation_required ? '⚠️ CONSULTATION CALL REQUIRED: Always mention scheduling a consultation call before providing final quote.' : 'No consultation call required.'}
+
         ### **Business Training Patterns (ENHANCEMENT DATA)**
         - **Average Training Bid Amount:** $${processedTrainingData.business_patterns.average_bid_amount.toFixed(2)}
         - **Pricing Strategy from Training:** ${Object.entries(processedTrainingData.pricing_strategy).filter(([k,v]) => v).map(([k,v]) => k.replace('_', ' ')).join(', ')}
@@ -727,37 +808,51 @@ const getEnhancedCategorySpecificPrompt = (category, requestData, pricingRules, 
         ### **PRICING CALCULATION INSTRUCTIONS (CRITICAL)**
         **PRIMARY PRICING FOUNDATION:** Use the business's explicit pricing rules as your starting point, NOT training averages.
 
-        1. **START WITH BUSINESS BASE PRICE:** $${pricingRules?.base_price || 'Calculate from pricing model'}
-        2. **APPLY PRICING MODEL:**
-           - If hourly_rate is set: Base Price = Hourly Rate × Event Duration
-           - If per_person_rate is set: Base Price = Per Person Rate × Guest Count
-           - If base_price is set: Use as starting point
-           - Otherwise: Use training average as fallback
+        1. **USE CALCULATED PRICE:** The final price of $${context.finalPrice} has already been calculated using:
+           - Base category rate: $${context.basePrice}
+           - Travel fees: $${context.travelFees.fee}
+           - Platform markup: ${pricingRules?.platform_markup ? `${pricingRules.platform_markup}%` : 'None'}
 
-        3. **APPLY BUSINESS-SPECIFIC ADJUSTMENTS:**
-           - **Wedding Premium:** ${pricingRules?.wedding_premium ? `Add $${pricingRules.wedding_premium} for weddings` : 'No wedding premium'}
-           - **Duration Multipliers:** ${pricingRules?.duration_multipliers ? `Apply: ${JSON.stringify(pricingRules.duration_multipliers)}` : 'No duration multipliers'}
-           - **Service Addons:** ${pricingRules?.service_addons ? `Include: ${JSON.stringify(pricingRules.service_addons)}` : 'No service addons'}
-           - **Seasonal Pricing:** ${pricingRules?.seasonal_pricing ? `Apply: ${JSON.stringify(pricingRules.seasonal_pricing)}` : 'No seasonal pricing'}
-           - **Group Discounts:** ${pricingRules?.group_discounts ? `Apply: ${JSON.stringify(pricingRules.group_discounts)}` : 'No group discounts'}
-           - **Travel Fee:** ${pricingRules?.travel_fee_per_mile ? `Add $${pricingRules.travel_fee_per_mile} per mile` : 'No travel fee'}
-           - **Rush Fee:** ${pricingRules?.rush_fee_percentage ? `Add ${pricingRules.rush_fee_percentage}% for rush orders` : 'No rush fee'}
+        2. **CATEGORY-SPECIFIC PRICING MODEL:**
+           ${pricingRules?.category === 'photography' || pricingRules?.category === 'videography' ? `
+           **PHOTOGRAPHY/VIDEOGRAPHY:**
+           - Wedding: $${pricingRules?.base_category_rates?.wedding || 'Not set'}
+           - Couple/Engagement: $${pricingRules?.base_category_rates?.couple || 'Not set'}
+           - Family/Portrait: $${pricingRules?.base_category_rates?.family || 'Not set'}` : ''}
+           
+           ${pricingRules?.category === 'catering' ? `
+           **CATERING:**
+           - Base rate: $${pricingRules?.base_category_rates?.catering || 'Not set'}
+           - Per-person: $${pricingRules?.per_person_rates?.base || 'Not set'} + $${pricingRules?.per_person_rates?.additionalPerson || 'Not set'} per additional person` : ''}
+           
+           ${pricingRules?.category === 'dj' ? `
+           **DJ:**
+           - First hour: $${pricingRules?.hourly_tiers?.firstHour || 'Not set'}
+           - Additional hours: $${pricingRules?.hourly_tiers?.additionalHours || 'Not set'}` : ''}
 
-        4. **RESPECT BUSINESS CONSTRAINTS:**
-           - Minimum Price: $${pricingRules?.min_price || 'No limit'}
-           - Maximum Price: $${pricingRules?.max_price || 'No limit'}
-           - Bid Aggressiveness: ${pricingRules?.bid_aggressiveness || 'Not specified'}
+        3. **TRAVEL & LOGISTICS:**
+           - Travel fees: $${context.travelFees.fee}${context.travelFees.warning ? ` - ${context.travelFees.warning}` : ''}
+           - Include travel warnings in bid message if applicable
 
-        5. **APPLY FEEDBACK ADJUSTMENTS:**
-           ${processedTrainingData.feedback_preferences.pricing_adjustments.includes('reduce_pricing') ? 
-             '⚠️ REDUCE pricing by 15-25% due to previous "too high" feedback' : ''}
-           ${processedTrainingData.feedback_preferences.pricing_adjustments.includes('increase_pricing') ? 
-             '⚠️ INCREASE pricing by 15-25% due to previous "too low" feedback' : ''}
+        4. **CONSULTATION REQUIREMENTS:**
+           ${pricingRules?.consultation_required ? 
+             '⚠️ ALWAYS mention scheduling a consultation call before providing final quote. Example: "I\'d love to schedule a quick call to discuss your specific needs and provide a final quote."' : 
+             'No consultation call required.'}
 
-        6. **FINAL VALIDATION:**
-           - Ensure price is within business min/max constraints
+        5. **PACKAGE SUGGESTIONS:**
+           - Suggest relevant packages from the business packages list
+           - Use package pricing as alternative to calculated pricing when appropriate
+
+        6. **UPSELL OPPORTUNITIES:**
+           - Mention relevant add-ons based on the request
+           - Keep suggestions non-aggressive and optional
+           - Focus on value-add services
+
+        7. **FINAL VALIDATION:**
+           - Use the calculated final price: $${context.finalPrice}
            - Ensure price is reasonable ($50-$50k range)
            - Match business's bid aggressiveness level
+           - Avoid blocklist_keywords: ${pricingRules?.blocklist_keywords ? JSON.stringify(pricingRules.blocklist_keywords) : 'None'}
 
         ### **Training Data Integration Instructions**
         Use the business's training patterns to enhance your bid (but don't override pricing rules):
@@ -1058,6 +1153,121 @@ function validateAndAdjustPricing(aiBid, pricingRules, trainingData) {
     
     console.log(`✅ Final validated bid amount: $${adjustedBid.bidAmount}`);
     return adjustedBid;
+}
+
+// Helper function to check dealbreakers
+function checkDealbreakers(requestData, pricingRules) {
+    if (!pricingRules.dealbreakers || pricingRules.dealbreakers.length === 0) {
+        return { allowed: true, violations: [] };
+    }
+    
+    // Convert request data to searchable text
+    const requestText = JSON.stringify(requestData).toLowerCase();
+    const additionalComments = requestData.additional_comments?.toLowerCase() || '';
+    const specialRequests = requestData.special_requests?.toLowerCase() || '';
+    const fullText = `${requestText} ${additionalComments} ${specialRequests}`;
+    
+    // Check for dealbreaker violations
+    const violations = pricingRules.dealbreakers.filter(dealbreaker => 
+        fullText.includes(dealbreaker.toLowerCase())
+    );
+    
+    return {
+        allowed: violations.length === 0,
+        violations
+    };
+}
+
+// Helper function to calculate travel fees
+function calculateTravelFees(vendorLocation, eventLocation, travelConfig) {
+    if (!travelConfig || !vendorLocation || !eventLocation) {
+        return { fee: 0, warning: null };
+    }
+    
+    // Simple distance calculation (in production, use Google Maps API)
+    // For now, we'll use a placeholder that can be enhanced later
+    const distance = 25; // Placeholder - would calculate actual distance
+    
+    if (distance <= travelConfig.freeDistance) {
+        return { fee: 0, warning: null };
+    }
+    
+    const fee = (distance - travelConfig.freeDistance) * travelConfig.drivingRate;
+    return { 
+        fee: Math.round(fee), 
+        warning: travelConfig.travelWarning 
+    };
+}
+
+// Helper function to apply seasonal pricing
+function applySeasonalPricing(basePrice, eventDate, seasonalPricing) {
+    if (!seasonalPricing || !eventDate) {
+        return basePrice;
+    }
+    
+    const month = new Date(eventDate).getMonth();
+    const seasonalMultiplier = seasonalPricing[month] || 1.0;
+    return Math.round(basePrice * seasonalMultiplier);
+}
+
+// Helper function to calculate duration-based pricing
+function calculateDurationPricing(duration, pricingRules) {
+    if (!duration || !pricingRules.hourly_tiers) {
+        return 0;
+    }
+    
+    const hours = parseInt(duration.match(/(\d+)/)?.[1] || 1);
+    const { firstHour, additionalHours } = pricingRules.hourly_tiers;
+    
+    if (hours === 1) {
+        return firstHour;
+    }
+    
+    return firstHour + (additionalHours * (hours - 1));
+}
+
+// Helper function to calculate category-specific pricing
+function calculateCategoryPricing(requestData, pricingRules) {
+    const category = requestData.service_category?.toLowerCase();
+    const eventType = requestData.event_type?.toLowerCase();
+    const guestCount = requestData.guest_count || requestData.estimated_guests || 1;
+    
+    if (!pricingRules.base_category_rates) {
+        return 0;
+    }
+    
+    // Determine which category rate to use
+    let baseRate = 0;
+    
+    if (category === 'photography' || category === 'videography') {
+        if (eventType === 'wedding') {
+            baseRate = pricingRules.base_category_rates.wedding || 0;
+        } else if (eventType === 'couple' || eventType === 'engagement') {
+            baseRate = pricingRules.base_category_rates.couple || 0;
+        } else if (eventType === 'family' || eventType === 'portrait') {
+            baseRate = pricingRules.base_category_rates.family || 0;
+        } else {
+            baseRate = pricingRules.base_category_rates.portrait || 0;
+        }
+    } else if (category === 'catering') {
+        baseRate = pricingRules.base_category_rates.catering || 0;
+    } else if (category === 'dj') {
+        baseRate = pricingRules.base_category_rates.dj || 0;
+    } else if (category === 'beauty') {
+        baseRate = pricingRules.base_category_rates.beauty || 0;
+    } else if (category === 'florist') {
+        baseRate = pricingRules.base_category_rates.florist || 0;
+    } else if (category === 'wedding_planning') {
+        baseRate = pricingRules.base_category_rates.wedding_planning || 0;
+    }
+    
+    // Apply per-person logic if applicable
+    if (pricingRules.per_person_rates && guestCount > 1) {
+        const { base, additionalPerson } = pricingRules.per_person_rates;
+        return base + (additionalPerson * (guestCount - 1));
+    }
+    
+    return baseRate;
 }
 
 // Export function
