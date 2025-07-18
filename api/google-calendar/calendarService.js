@@ -108,7 +108,7 @@ async checkAvailability(businessId, date) {
     const availableSlots = [];
 
     // Parse consultation hours with timezone support
-    const consultationHours = this.parseConsultationHours(business.consultation_hours, timeZone);
+    let consultationHours = this.parseConsultationHours(business.consultation_hours, timeZone);
     
     if (!consultationHours) {
       console.warn(`No consultation hours found for business ${businessId}, using default hours`);
@@ -176,8 +176,14 @@ parseConsultationHours(consultationHours, timeZone) {
       consultationHours = JSON.parse(consultationHours);
     }
 
+    // Handle nested structure where consultation_hours is inside another object
+    let hoursData = consultationHours;
+    if (consultationHours.consultation_hours) {
+      hoursData = consultationHours.consultation_hours;
+    }
+
     // Extract hours and days
-    const { startTime, endTime, daysAvailable } = consultationHours;
+    const { startTime, endTime, daysAvailable } = hoursData;
 
     if (!startTime || !endTime || !daysAvailable) {
       console.warn('Invalid consultation hours format:', consultationHours);
