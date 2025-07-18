@@ -212,7 +212,24 @@ parseConsultationHours(consultationHours, timeZone) {
     };
 
     let daysArray = daysAvailable;
-    if (Array.isArray(daysAvailable)) {
+    
+    // Handle object format where daysAvailable is { sunday: true, monday: false, etc. }
+    if (typeof daysAvailable === 'object' && !Array.isArray(daysAvailable)) {
+      const dayNameToNumberLower = {
+        'sunday': 0,
+        'monday': 1,
+        'tuesday': 2,
+        'wednesday': 3,
+        'thursday': 4,
+        'friday': 5,
+        'saturday': 6
+      };
+      
+      daysArray = Object.entries(daysAvailable)
+        .filter(([day, isAvailable]) => isAvailable)
+        .map(([day]) => dayNameToNumberLower[day.toLowerCase()])
+        .filter(dayNum => dayNum !== undefined);
+    } else if (Array.isArray(daysAvailable)) {
       daysArray = daysAvailable.map(day => {
         if (typeof day === 'string') {
           return dayNameToNumber[day] || 0;
