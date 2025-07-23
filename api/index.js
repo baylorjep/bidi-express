@@ -951,7 +951,7 @@ app.post('/create-plus-checkout-session', async (req, res) => {
  * .then(data => console.log(data));
  */
 // Resend email endpoint
-app.post('/send-resend-email', async (req, res) => {
+app.post('/api/send-resend-email', async (req, res) => {
   const { category, businesses } = req.body;
 
   if (!category) {
