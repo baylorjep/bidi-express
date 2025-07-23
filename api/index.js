@@ -921,78 +921,165 @@ app.post('/create-plus-checkout-session', async (req, res) => {
   }
 });
 
+/**
+ * Example frontend request for /send-resend-email:
+ *
+ * fetch('/api/send-resend-email', {
+ *   method: 'POST',
+ *   headers: { 'Content-Type': 'application/json' },
+ *   body: JSON.stringify({
+ *     category: 'Photography',
+ *     businesses: [
+ *       {
+ *         email: 'biz1@email.com',
+ *         businessName: 'Acme Photography',
+ *         budget: '$2,000 - $3,000',
+ *         location: 'New York, NY',
+ *         date: '2024-07-15'
+ *       },
+ *       {
+ *         email: 'biz2@email.com',
+ *         businessName: 'Best Snaps',
+ *         budget: '$1,500 - $2,500',
+ *         location: 'Boston, MA',
+ *         date: '2024-08-01'
+ *       }
+ *     ]
+ *   })
+ * })
+ * .then(res => res.json())
+ * .then(data => console.log(data));
+ */
 // Resend email endpoint
 app.post('/send-resend-email', async (req, res) => {
-  const { category } = req.body;
+  const { category, businesses } = req.body;
 
   if (!category) {
     return res.status(400).json({ error: "Missing required field: category." });
   }
 
   try {
-    // Fetch user IDs matching the category from `business_profiles`
-    const { data: users, error: usersError } = await supabase
-      .from('business_profiles')
-      .select('id')
-      .eq('business_category', category);
+    let recipients = [];
 
-    if (usersError) {
-      console.error("Error fetching users by category:", usersError.message);
-      return res.status(500).json({ error: "Failed to fetch users by category." });
+    if (Array.isArray(businesses) && businesses.length > 0) {
+      // Use provided businesses array
+      recipients = businesses.filter(biz => biz.email && biz.businessName && biz.budget && biz.location && biz.date);
+    } else {
+      // Fallback: fetch from Supabase as before
+      const { data: users, error: usersError } = await supabase
+        .from('business_profiles')
+        .select('id, business_name')
+        .eq('business_category', category);
+
+      if (usersError) {
+        console.error("Error fetching users by category:", usersError.message);
+        return res.status(500).json({ error: "Failed to fetch users by category." });
+      }
+
+      if (!users || users.length === 0) {
+        return res.status(404).json({ error: `No users found in category: ${category}.` });
+      }
+
+      const userIds = users.map(user => user.id);
+      const { data: emails, error: emailsError } = await supabase
+        .from('profiles')
+        .select('id, email')
+        .in('id', userIds);
+
+      if (emailsError) {
+        console.error("Error fetching emails:", emailsError.message);
+        return res.status(500).json({ error: "Failed to fetch emails for users." });
+      }
+
+      // You may want to fetch budget/location/date from somewhere else or set as "N/A"
+      recipients = users.map(user => {
+        const emailObj = emails.find(e => e.id === user.id);
+        return {
+          email: emailObj?.email,
+          businessName: user.business_name || "Business",
+          budget: "N/A",
+          location: "N/A",
+          date: "N/A"
+        };
+      }).filter(r => r.email);
     }
 
-    if (!users || users.length === 0) {
-      return res.status(404).json({ error: `No users found in category: ${category}.` });
-    }
-    console.log(`Users retrieved from business_profiles:`, users.map(u => u.id));
-
-    // Extract user IDs
-    const userIds = users.map(user => user.id);
-
-    // Fetch emails for these user IDs from the `profiles` table
-    const { data: emails, error: emailsError } = await supabase
-      .from('profiles')
-      .select('email')
-      .in('id', userIds);
-
-    if (emailsError) {
-      console.error("Error fetching emails:", emailsError.message);
-      return res.status(500).json({ error: "Failed to fetch emails for users." });
-    }
-
-    if (!emails || emails.length === 0) {
-      return res.status(404).json({ error: `No emails found for users in category: ${category}.` });
-    }
-    console.log("Emails retrieved from profiles:", emails);
-
-    const validEmails = emails.map(e => e.email).filter(email => email); // Ensure no null values
-
-    console.log(`📩 Sending emails to ${validEmails.length} users in category: ${category}`);
-
-    // **Batch Processing to Avoid Rate Limit**
-    const batchSize = 2; // Resend allows 2 requests per second
+    // Batch sending (2 per second)
+    const batchSize = 2;
     let batchIndex = 0;
 
-    while (batchIndex < validEmails.length) {
-      const batch = validEmails.slice(batchIndex, batchIndex + batchSize);
+    while (batchIndex < recipients.length) {
+      const batch = recipients.slice(batchIndex, batchIndex + batchSize);
 
       await Promise.all(
-        batch.map(async (email) => {
-          const subject = `You have a new ${category} request on Bidi!`;
+        batch.map(async ({ email, businessName, budget, location, date }) => {
           const htmlContent = `
-            <p>Hey there!</p>
-            <p>You have 1 new ${category} request to view on Bidi!</p>
-            <p>Log in to your Bidi dashboard to learn more.</p>
-            <p><a href="https://www.savewithbidi.com/open-requests" target="_blank" style="color: #007BFF; text-decoration: none;">Click here to view the request!</a></p>
-            <p>Best,</p>
-            <p>The Bidi Team</p>
+            <!DOCTYPE html>
+            <html>
+              <body style="margin:0; padding:0; background:#f6f9fc;">
+                <table width="100%" cellpadding="0" cellspacing="0" style="background:#f6f9fc; padding:40px 0;">
+                  <tr>
+                    <td align="center">
+                      <table width="480" cellpadding="0" cellspacing="0" style="background:#fff; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.05); padding:32px;">
+                        <tr>
+                          <td align="center" style="padding-bottom:24px;">
+                            <img src="https://www.savewithbidi.com/static/media/Bidi-Logo.27a418eddac8515e0463b805133471d0.svg" alt="Bidi Logo" width="120" style="display:block; margin:0 auto 12px;" />
+                          </td>
+                        </tr>
+                        <tr>
+                          <td align="center" style="font-family:Segoe UI,Arial,sans-serif; color:#222; font-size:22px; font-weight:600; padding-bottom:12px;">
+                            Hi ${businessName},
+                          </td>
+                        </tr>
+                        <tr>
+                          <td align="center" style="font-family:Segoe UI,Arial,sans-serif; color:#444; font-size:16px; padding-bottom:24px;">
+                            You have a new <b>${category}</b> request waiting for you on Bidi!
+                          </td>
+                        </tr>
+                        <tr>
+                          <td align="center" style="padding-bottom:24px;">
+                            <table style="margin: 0 auto; background: #f6f9fc; border-radius: 8px; padding: 16px;">
+                              <tr>
+                                <td style="padding: 4px 12px;"><b>Budget:</b></td>
+                                <td style="padding: 4px 12px;">${budget}</td>
+                              </tr>
+                              <tr>
+                                <td style="padding: 4px 12px;"><b>Location:</b></td>
+                                <td style="padding: 4px 12px;">${location}</td>
+                              </tr>
+                              <tr>
+                                <td style="padding: 4px 12px;"><b>Date:</b></td>
+                                <td style="padding: 4px 12px;">${date}</td>
+                              </tr>
+                            </table>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td align="center" style="padding-bottom:32px;">
+                            <a href="https://www.savewithbidi.com/business-dashboard"
+                              style="background:#A328F4; color:#fff; text-decoration:none; font-weight:600; padding:14px 32px; border-radius:8px; font-size:16px; display:inline-block;">
+                              View Request
+                            </a>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td align="center" style="font-family:Segoe UI,Arial,sans-serif; color:#888; font-size:13px;">
+                            Best,<br/>The Bidi Team
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+              </body>
+            </html>
           `;
 
           try {
             await resend.emails.send({
               from: 'noreply@savewithbidi.com',
               to: email,
-              subject,
+              subject: `You have a new ${category} request on Bidi!`,
               html: htmlContent,
             });
             console.log(`✅ Email sent to: ${email}`);
@@ -1003,14 +1090,11 @@ app.post('/send-resend-email', async (req, res) => {
       );
 
       batchIndex += batchSize;
-
-      if (batchIndex < validEmails.length) {
-        console.log(`⏳ Waiting 1 second before sending next batch...`);
-        await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait 1 second before next batch
+      if (batchIndex < recipients.length) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
 
-    console.log(`✅ All emails sent successfully for category: ${category}`);
     res.status(200).json({ message: `Emails sent successfully to all users in category: ${category}.` });
 
   } catch (error) {
