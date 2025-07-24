@@ -846,6 +846,47 @@ async function handlePaymentIntentFailed(paymentIntent) {
   // await updateDatabaseForFailedPayment(paymentIntent);
 }
 
+// Nodemailer SMTP/email setup
+const SibApiV3Sdk = require('sib-api-v3-sdk');
+
+// Initialize Brevo client
+const defaultClient = SibApiV3Sdk.ApiClient.instance;
+const apiKey = defaultClient.authentications['api-key'];
+apiKey.apiKey = process.env.BREVO_API_KEY; // Store your API key securely
+
+// Middleware
+app.use(bodyParser.json());
+
+// Function to send an email via Brevo
+const sendEmailNotification = async (recipientEmail, subject, htmlContent) => {
+    try {
+        const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
+        const sendSmtpEmail = new SibApiV3Sdk.SendSmtpEmail({
+            to: [{ email: recipientEmail }],
+            sender: { name: 'Bidi', email: 'savewithbidi@gmail.com' },
+            subject: subject,
+            htmlContent: htmlContent
+        });
+
+        const data = await apiInstance.sendTransacEmail(sendSmtpEmail);
+        console.log('API called successfully. Returned data: ' + data);
+    } catch (error) {
+        console.error('Error sending email:', error);
+    }
+};
+
+// Endpoint for sending email notifications
+app.post('/send-email', async (req, res) => {
+    const { recipientEmail, subject, htmlContent } = req.body;
+
+    try {
+        await sendEmailNotification(recipientEmail, subject, htmlContent);
+        res.status(200).send('Email sent successfully');
+    } catch (error) {
+        res.status(500).send('Error sending email: ' + error.message);
+    }
+});
+
 app.post('/create-plus-checkout-session', async (req, res) => {
   const { userId } = req.body; // Pass the user ID from the frontend
 
@@ -1036,7 +1077,7 @@ app.post('/api/send-resend-email', async (req, res) => {
 
           try {
             await resend.emails.send({
-              from: { name: 'Bidi', email: 'noreply@savewithbidi.com' },
+              from: 'noreply@savewithbidi.com',
               to: email,
               subject: `You have a new ${category} request on Bidi!`,
               html: htmlContent,
