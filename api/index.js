@@ -1023,7 +1023,7 @@ app.post('/api/send-resend-email', async (req, res) => {
                       <table width="480" cellpadding="0" cellspacing="0" style="background:#fff; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.05); padding:32px;">
                         <tr>
                           <td align="center" style="padding-bottom:24px;">
-                            <img src="https://www.savewithbidi.com/static/media/Bidi-Logo.27a418eddac8515e0463b805133471d0.svg" alt="Bidi Logo" width="120" style="display:block; margin:0 auto 12px;" />
+                            <img src="https://i.imgur.com/LBdztzj.png" alt="Bidi Logo" width="120" style="display:block; margin:0 auto 12px;" />
                           </td>
                         </tr>
                         <tr>
