@@ -846,38 +846,6 @@ async function handlePaymentIntentFailed(paymentIntent) {
   // await updateDatabaseForFailedPayment(paymentIntent);
 }
 
-// Nodemailer SMTP/email setup
-
-// Function to send an email via Brevo
-const sendEmailNotification = async (recipientEmail, subject, htmlContent) => {
-    try {
-        const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
-        const sendSmtpEmail = new SibApiV3Sdk.SendSmtpEmail({
-            to: [{ email: recipientEmail }],
-            sender: { name: 'Bidi', email: 'savewithbidi@gmail.com' },
-            subject: subject,
-            htmlContent: htmlContent
-        });
-
-        const data = await apiInstance.sendTransacEmail(sendSmtpEmail);
-        console.log('API called successfully. Returned data: ' + data);
-    } catch (error) {
-        console.error('Error sending email:', error);
-    }
-};
-
-// Endpoint for sending email notifications
-app.post('/send-email', async (req, res) => {
-    const { recipientEmail, subject, htmlContent } = req.body;
-
-    try {
-        await sendEmailNotification(recipientEmail, subject, htmlContent);
-        res.status(200).send('Email sent successfully');
-    } catch (error) {
-        res.status(500).send('Error sending email: ' + error.message);
-    }
-});
-
 app.post('/create-plus-checkout-session', async (req, res) => {
   const { userId } = req.body; // Pass the user ID from the frontend
 
