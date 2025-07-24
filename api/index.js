@@ -847,15 +847,6 @@ async function handlePaymentIntentFailed(paymentIntent) {
 }
 
 // Nodemailer SMTP/email setup
-const SibApiV3Sdk = require('sib-api-v3-sdk');
-
-// Initialize Brevo client
-const defaultClient = SibApiV3Sdk.ApiClient.instance;
-const apiKey = defaultClient.authentications['api-key'];
-apiKey.apiKey = process.env.BREVO_API_KEY; // Store your API key securely
-
-// Middleware
-app.use(bodyParser.json());
 
 // Function to send an email via Brevo
 const sendEmailNotification = async (recipientEmail, subject, htmlContent) => {
@@ -1077,7 +1068,7 @@ app.post('/api/send-resend-email', async (req, res) => {
 
           try {
             await resend.emails.send({
-              from: 'noreply@savewithbidi.com',
+              from: { name: 'Bidi', email: 'noreply@savewithbidi.com' },
               to: email,
               subject: `You have a new ${category} request on Bidi!`,
               html: htmlContent,
