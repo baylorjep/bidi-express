@@ -966,30 +966,30 @@ app.post('/api/send-resend-email', async (req, res) => {
       recipients = businesses.filter(biz => biz.email && biz.businessName && biz.budget && biz.location && biz.date);
     } else {
       // Fallback: fetch from Supabase as before
-      const { data: users, error: usersError } = await supabase
-        .from('business_profiles')
+    const { data: users, error: usersError } = await supabase
+      .from('business_profiles')
         .select('id, business_name')
-        .eq('business_category', category);
+      .eq('business_category', category);
 
-      if (usersError) {
-        console.error("Error fetching users by category:", usersError.message);
-        return res.status(500).json({ error: "Failed to fetch users by category." });
-      }
+    if (usersError) {
+      console.error("Error fetching users by category:", usersError.message);
+      return res.status(500).json({ error: "Failed to fetch users by category." });
+    }
 
-      if (!users || users.length === 0) {
-        return res.status(404).json({ error: `No users found in category: ${category}.` });
-      }
+    if (!users || users.length === 0) {
+      return res.status(404).json({ error: `No users found in category: ${category}.` });
+    }
 
-      const userIds = users.map(user => user.id);
-      const { data: emails, error: emailsError } = await supabase
-        .from('profiles')
+    const userIds = users.map(user => user.id);
+    const { data: emails, error: emailsError } = await supabase
+      .from('profiles')
         .select('id, email')
-        .in('id', userIds);
+      .in('id', userIds);
 
-      if (emailsError) {
-        console.error("Error fetching emails:", emailsError.message);
-        return res.status(500).json({ error: "Failed to fetch emails for users." });
-      }
+    if (emailsError) {
+      console.error("Error fetching emails:", emailsError.message);
+      return res.status(500).json({ error: "Failed to fetch emails for users." });
+    }
 
       // You may want to fetch budget/location/date from somewhere else or set as "N/A"
       recipients = users.map(user => {
@@ -1928,40 +1928,30 @@ async function generateAIBidForTraining(trainingData, sampleRequest, category, b
     console.log(`📦 Found ${businessPackages?.length || 0} packages for business`);
   }
 
-  // Calculate pricing using new logic
+  // Calculate base pricing (simplified for conversation starter approach)
   let basePrice = 0;
   let travelFees = { fee: 0, warning: null };
   let finalPrice = 0;
 
   if (pricingRules) {
-    // Calculate base price using new category-specific pricing
+    // Use explicit pricing rules as the foundation
     basePrice = calculateCategoryPricing(sampleRequest, pricingRules);
     
-    // Apply duration-based pricing if applicable
-    if (pricingRules.hourly_rate && sampleRequest.duration) {
-      basePrice = calculateDurationPricing(sampleRequest.duration, pricingRules);
-    }
-    
-    // Apply seasonal pricing
-    if (sampleRequest.start_date) {
-      basePrice = applySeasonalPricing(basePrice, sampleRequest.start_date);
-    }
-    
-    // Calculate travel fees
-    travelFees = calculateTravelFees(null, sampleRequest.location, pricingRules);
-    
-    // Apply platform markup
-    finalPrice = basePrice + travelFees.fee;
+    // Apply platform markup if specified
+    finalPrice = basePrice;
     if (pricingRules.platform_fee_markup_percent) {
       const markup = finalPrice * (parseFloat(pricingRules.platform_fee_markup_percent) / 100);
       finalPrice += markup;
     }
     
-    console.log(`💰 Training pricing calculated: Base $${basePrice}, Travel $${travelFees.fee}, Final $${finalPrice}`);
+    // Calculate travel fees for warning purposes
+    travelFees = calculateTravelFees(null, sampleRequest.location, pricingRules);
+    
+    console.log(`💰 Base pricing calculated: $${basePrice} -> Final $${finalPrice}`);
   } else {
     // Fallback to training data average if no pricing rules
     const avgBid = trainingData.responses.reduce((sum, r) => sum + r.bid_amount, 0) / trainingData.responses.length;
-    basePrice = Math.round(avgBid * 0.8); // Use 80% of average as base
+    basePrice = Math.round(avgBid * 0.9); // Use 90% of average as base
     finalPrice = basePrice;
     console.log(`⚠️ No pricing rules found, using training average: $${avgBid} -> Base $${basePrice}`);
   }
@@ -2448,122 +2438,79 @@ function createTrainingAIPrompt(processedData, sampleRequest, category, pricingR
   // Pricing calculation is now handled by the new helper functions above
 
   return `
-You are an AI assistant that generates personalized bids for ${category} services based on a business's pricing rules, training data, and feedback.
+You are an AI assistant that generates conversation-starting bids for ${category} services. Your goal is to provide an accurate base offer with smart upsell suggestions, not perfect pricing.
 
-### BUSINESS PRICING RULES (PRIMARY FOUNDATION):
+### BUSINESS PRICING RULES (FOUNDATION):
 ${formatPricingRules(pricingRules)}
 
 ### BUSINESS PACKAGES (AVAILABLE OPTIONS):
 ${formatBusinessPackages(businessPackages)}
 
-### CALCULATED PRICING BREAKDOWN:
+### BASE PRICING CALCULATION:
 - **Base Price:** $${basePrice}
-- **Travel Fees:** $${travelFees.fee}${travelFees.warning ? ` (${travelFees.warning})` : ''}
-- **Platform Markup:** ${pricingRules?.platform_markup ? `${pricingRules.platform_markup}%` : 'None'}
-- **Final Price:** $${finalPrice}
+- **Platform Markup:** ${pricingRules?.platform_fee_markup_percent ? `${pricingRules.platform_fee_markup_percent}%` : 'None'}
+- **Final Base Price:** $${finalPrice}
+- **Travel Warning:** ${travelFees.warning || 'None'}
 
 ### CONSULTATION REQUIREMENTS:
-${pricingRules?.consultation_required ? '⚠️ CONSULTATION CALL REQUIRED: Always mention scheduling a consultation call before providing final quote.' : 'No consultation call required.'}
+${pricingRules?.require_consultation ? 'MUST include consultation call requirement.' : 'No consultation call required.'}
 
-### BUSINESS TRAINING PATTERNS (ENHANCEMENT DATA):
-- **Training Bid Range:** $${Math.min(...processedData.responses?.map(r => r.bid_amount) || [0])} - $${Math.max(...processedData.responses?.map(r => r.bid_amount) || [0])}
+### BUSINESS TRAINING PATTERNS:
 - **Average Training Bid:** $${processedData.business_patterns.average_bid_amount.toFixed(2)}
-- **Pricing Strategy:** ${Object.entries(processedData.pricing_strategy).filter(([k,v]) => v).map(([k,v]) => k.replace('_', ' ')).join(', ')}
 - **Service Emphasis:** ${processedData.service_preferences.join(', ')}
 - **Description Style:** ${processedData.business_patterns.description_style}
-- **Pricing Factors:** ${processedData.business_patterns.pricing_factors.join(', ')}
 
-### CRITICAL FEEDBACK LEARNING:
-- **Approval Rate:** ${(processedData.feedback_preferences.approval_rate * 100).toFixed(1)}%
-- **Pricing Adjustments Needed:** ${processedData.feedback_preferences.pricing_adjustments.join(', ') || 'none'}
+### FEEDBACK LEARNING:
 - **Common Issues to Avoid:** ${processedData.feedback_preferences.common_issues.join(', ') || 'none'}
-- **Specific Feedback Received:** ${processedData.feedback_preferences.specific_feedback.slice(0, 3).join(' | ') || 'none'}
 - **Preferred Improvements:** ${processedData.feedback_preferences.preferred_improvements.slice(0, 2).join(' | ') || 'none'}
 
-### PRICING ADJUSTMENT INSTRUCTIONS:
-${processedData.feedback_preferences.pricing_adjustments.includes('reduce_pricing') ? 
-  '⚠️ CRITICAL: Previous feedback indicates pricing was TOO HIGH. Reduce your bid amount by 15-25% from the business base price.' : ''}
-${processedData.feedback_preferences.pricing_adjustments.includes('increase_pricing') ? 
-  '⚠️ CRITICAL: Previous feedback indicates pricing was TOO LOW. Increase your bid amount by 15-25% from the business base price.' : ''}
-${processedData.feedback_preferences.pricing_adjustments.length === 0 ? 
-  '✅ No major pricing issues identified in feedback. Use business pricing rules as baseline.' : ''}
-
-### SPECIFIC REQUEST ANALYSIS:
+### SPECIFIC REQUEST:
 - **Duration:** ${sampleRequest.duration}
 - **Event Type:** ${sampleRequest.event_type}
 - **Guest Count:** ${sampleRequest.guest_count}
 - **Location:** ${sampleRequest.location}
 - **Requirements:** ${sampleRequest.requirements?.join(', ')}
-- **Suggested Base Price Range:** $${Math.round(basePrice * 0.8)} - $${Math.round(basePrice * 1.2)}
 
-### CATEGORY-SPECIFIC FACTORS:
-- **Pricing Factors:** ${categoryInfo.pricingFactors}
-- **Service Types:** ${categoryInfo.serviceTypes}
+### CATEGORY-SPECIFIC STRATEGY:
+${category === 'photography' ? `
+**PHOTOGRAPHY FOCUS:**
+- Base pricing by service type (weddings, family, couples, portraits)
+- Common add-ons: Second shooter, engagement sessions, bridals, prints/albums, videography
+- Always mention consultation call requirement
+- Include travel disclaimer for engagements/bridals` : ''}
+${category === 'dj' ? `
+**DJ FOCUS:**
+- First hour premium, then hourly rate
+- Seasonal pricing adjustments
+- Add-ons: MC services, lighting, cold sparks, ceremony audio
+- Music style matching important` : ''}
+${category === 'videography' ? `
+**VIDEOGRAPHY FOCUS:**
+- Full-day vs AM/PM pricing
+- Add-ons: Second videographer, drone, speed editing, ceremony audio
+- Bundle with photography when possible` : ''}
 
-### PRICING CALCULATION INSTRUCTIONS (CRITICAL):
-**PRIMARY PRICING FOUNDATION:** Use the business's explicit pricing rules as your starting point, NOT training averages.
+### CONVERSATION STARTER APPROACH:
+1. **BASE OFFER:** Use the calculated base price of $${finalPrice} as your starting point
+2. **UPSELL SUGGESTIONS:** Include 2-3 relevant add-ons as optional enhancements
+3. **CONSULTATION CALL:** ${pricingRules?.require_consultation ? 'MUST mention consultation call requirement' : 'Optional to mention'}
+4. **TRAVEL WARNING:** ${travelFees.warning ? `Include: "${travelFees.warning}"` : 'No travel warning needed'}
+5. **DEALBREAKERS:** ${pricingRules?.dealbreakers ? `Avoid: ${JSON.stringify(pricingRules.dealbreakers)}` : 'No dealbreakers specified'}
 
-1. **USE CALCULATED PRICE:** The final price of $${finalPrice} has already been calculated using:
-   - Base category rate: $${basePrice}
-   - Travel fees: $${travelFees.fee}
-   - Platform markup: ${pricingRules?.platform_markup ? `${pricingRules.platform_markup}%` : 'None'}
-
-2. **CATEGORY-SPECIFIC PRICING MODEL:**
-   ${pricingRules?.category === 'photography' || pricingRules?.category === 'videography' ? `
-   **PHOTOGRAPHY/VIDEOGRAPHY:**
-   - Wedding: $${pricingRules?.base_category_rates?.wedding || 'Not set'}
-   - Couple/Engagement: $${pricingRules?.base_category_rates?.couple || 'Not set'}
-   - Family/Portrait: $${pricingRules?.base_category_rates?.family || 'Not set'}` : ''}
-   
-   ${pricingRules?.category === 'catering' ? `
-   **CATERING:**
-   - Base rate: $${pricingRules?.base_category_rates?.catering || 'Not set'}
-   - Per-person: $${pricingRules?.per_person_rates?.base || 'Not set'} + $${pricingRules?.per_person_rates?.additionalPerson || 'Not set'} per additional person` : ''}
-   
-   ${pricingRules?.category === 'dj' ? `
-   **DJ:**
-   - First hour: $${pricingRules?.hourly_tiers?.firstHour || 'Not set'}
-   - Additional hours: $${pricingRules?.hourly_tiers?.additionalHours || 'Not set'}` : ''}
-
-3. **TRAVEL & LOGISTICS:**
-   - Travel fees: $${travelFees.fee}${travelFees.warning ? ` - ${travelFees.warning}` : ''}
-   - Include travel warnings in bid message if applicable
-
-4. **CONSULTATION REQUIREMENTS:**
-   ${pricingRules?.consultation_required ? 
-     '⚠️ ALWAYS mention scheduling a consultation call before providing final quote. Example: "I\'d love to schedule a quick call to discuss your specific needs and provide a final quote."' : 
-     'No consultation call required.'}
-
-5. **PACKAGE SUGGESTIONS:**
-   - Suggest relevant packages from the business packages list
-   - Use package pricing as alternative to calculated pricing when appropriate
-
-6. **UPSELL OPPORTUNITIES:**
-   - Mention relevant add-ons based on the request
-   - Keep suggestions non-aggressive and optional
-   - Focus on value-add services
-
-7. **FINAL VALIDATION:**
-   - Use the calculated final price: $${finalPrice}
-   - Ensure price is reasonable ($50-$50k range)
-   - Match business's bid aggressiveness level
-   - Avoid blocklist_keywords: ${pricingRules?.blocklist_keywords ? JSON.stringify(pricingRules.blocklist_keywords) : 'None'}
-
-### TRAINING DATA INTEGRATION:
-Use the business's training patterns to enhance your bid (but don't override pricing rules):
-1. **Follow their pricing strategy** - Use their preferred pricing approach
-2. **Emphasize their preferred services** - Highlight services they typically include
-3. **Match their description style** - Use their preferred level of detail
-4. **AVOID THESE ISSUES:** ${processedData.feedback_preferences.common_issues.join(', ') || 'none'}
-5. **INCORPORATE THESE IMPROVEMENTS:** ${processedData.feedback_preferences.preferred_improvements.slice(0, 2).join(' | ') || 'none'}
+### BID STRUCTURE:
+- Start with warm, professional greeting
+- Present the base offer clearly
+- Suggest 2-3 relevant add-ons as "optional enhancements"
+- Include consultation call if required
+- End with call-to-action for next steps
 
 ### RETURN JSON FORMAT ONLY:
 \`\`\`json
 {
-  "bidAmount": <calculated bid amount with feedback-based adjustments>,
-  "bidDescription": "<detailed bid description incorporating feedback improvements>",
-  "pricingBreakdown": "<detailed pricing breakdown>",
-  "pricingReasoning": "<explanation of pricing strategy including feedback considerations>"
+  "bidAmount": ${finalPrice},
+  "bidDescription": "<conversation-starting bid with base offer and upsell suggestions>",
+  "pricingBreakdown": "Base Price: $${basePrice}\\nPlatform Markup: ${pricingRules?.platform_fee_markup_percent ? `${pricingRules.platform_fee_markup_percent}%` : 'None'}\\nTotal: $${finalPrice}",
+  "pricingReasoning": "<brief explanation of base pricing and upsell strategy>"
 }
 \`\`\`
 `;
