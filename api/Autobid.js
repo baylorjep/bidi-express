@@ -450,15 +450,22 @@ const generateAutoBidForBusiness = async (businessId, requestDetails) => {
         }
 
         // Step 3: Retrieve the business's pricing rules
-        const { data: pricingRules, error: pricingError } = await supabase
+        const { data: pricingRulesData, error: pricingError } = await supabase
             .from("business_pricing_rules")
             .select("*")
             .eq("business_id", businessId)
             .eq("category", requestDetails.service_category)
-            .single();
+            .order("created_at", { ascending: false })
+            .limit(1);
 
+        let pricingRules = null;
         if (pricingError) {
-            console.warn("⚠️ No explicit pricing rules found for Business ID:", businessId, "Category:", requestDetails.service_category);
+            console.warn("⚠️ Error fetching pricing rules for Business ID:", businessId, "Category:", requestDetails.service_category, "Error:", pricingError);
+        } else if (pricingRulesData && pricingRulesData.length > 0) {
+            pricingRules = pricingRulesData[0];
+            console.log("✅ Found pricing rules for business:", pricingRules);
+        } else {
+            console.warn("⚠️ No pricing rules found for Business ID:", businessId, "Category:", requestDetails.service_category);
         }
 
         // Step 3.1: Check dealbreakers before proceeding

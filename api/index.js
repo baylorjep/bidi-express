@@ -1901,17 +1901,36 @@ async function generateAIBidForTraining(trainingData, sampleRequest, category, b
 
   // Fetch business pricing rules for training
   console.log(`🔍 Fetching pricing rules for Business ${businessId}, Category: ${category}`);
-  const { data: pricingRules, error: pricingError } = await supabase
+  console.log(`🔍 Query parameters: business_id=${businessId}, category=${category}`);
+  
+  const { data: pricingRulesData, error: pricingError } = await supabase
     .from("business_pricing_rules")
     .select("*")
     .eq("business_id", businessId)
     .eq("category", category)
-    .single();
+    .order("created_at", { ascending: false })
+    .limit(1);
 
+  let pricingRules = null;
   if (pricingError) {
-    console.warn("⚠️ No explicit pricing rules found for Business ID:", businessId, "Category:", category);
-  } else {
+    console.warn("⚠️ Error fetching pricing rules for Business ID:", businessId, "Category:", category, "Error:", pricingError);
+  } else if (pricingRulesData && pricingRulesData.length > 0) {
+    pricingRules = pricingRulesData[0];
     console.log("✅ Found pricing rules for business:", pricingRules);
+  } else {
+    console.warn("⚠️ No pricing rules found for Business ID:", businessId, "Category:", category);
+    
+    // Debug: Check if there are any pricing rules for this business at all
+    const { data: allBusinessRules, error: allRulesError } = await supabase
+      .from("business_pricing_rules")
+      .select("id, category, created_at")
+      .eq("business_id", businessId);
+    
+    if (allRulesError) {
+      console.warn("⚠️ Error checking all business rules:", allRulesError);
+    } else {
+      console.log(`🔍 Found ${allBusinessRules?.length || 0} total pricing rules for business ${businessId}:`, allBusinessRules);
+    }
   }
 
   // Fetch business packages for training
@@ -1949,11 +1968,10 @@ async function generateAIBidForTraining(trainingData, sampleRequest, category, b
     
     console.log(`💰 Base pricing calculated: $${basePrice} -> Final $${finalPrice}`);
   } else {
-    // Fallback to training data average if no pricing rules
-    const avgBid = trainingData.responses.reduce((sum, r) => sum + r.bid_amount, 0) / trainingData.responses.length;
-    basePrice = Math.round(avgBid * 0.9); // Use 90% of average as base
-    finalPrice = basePrice;
-    console.log(`⚠️ No pricing rules found, using training average: $${avgBid} -> Base $${basePrice}`);
+    // No pricing rules - let AI generate custom bid based on request details
+    basePrice = 0; // Let AI determine based on request
+    finalPrice = 0; // Let AI determine based on request
+    console.log(`⚠️ No pricing rules found, allowing AI to generate custom bid based on request details`);
   }
 
   // Process training data for AI
@@ -2001,8 +2019,10 @@ async function generateAIBidForTraining(trainingData, sampleRequest, category, b
   // Validate and adjust pricing using business rules (same as production)
   const validatedBid = validateAndAdjustPricingForTraining(aiBid, pricingRules, trainingData);
   
-  // Use the calculated final price instead of AI-generated price
-  validatedBid.bidAmount = finalPrice;
+  // Use the calculated final price only if pricing rules are configured
+  if (pricingRules) {
+    validatedBid.bidAmount = finalPrice;
+  }
   
   console.log(`💰 Final validated training bid: $${validatedBid.bidAmount}`);
 
@@ -2438,7 +2458,7 @@ function createTrainingAIPrompt(processedData, sampleRequest, category, pricingR
   // Pricing calculation is now handled by the new helper functions above
 
   return `
-You are an AI assistant that generates conversation-starting bids for ${category} services. Your goal is to provide an accurate base offer with smart upsell suggestions, not perfect pricing.
+You are an AI assistant that generates conversation-starting bids for ${category} services. Your goal is to provide an accurate base offer with smart upsell suggestions, not perfect pricing. ${!pricingRules ? 'Since no pricing rules are configured, generate a custom bid amount based on the specific request details, duration, location, and your training patterns.' : ''}
 
 ### BUSINESS PRICING RULES (FOUNDATION):
 ${formatPricingRules(pricingRules)}
@@ -2447,10 +2467,14 @@ ${formatPricingRules(pricingRules)}
 ${formatBusinessPackages(businessPackages)}
 
 ### BASE PRICING CALCULATION:
+${pricingRules ? `
 - **Base Price:** $${basePrice}
-- **Platform Markup:** ${pricingRules?.platform_fee_markup_percent ? `${pricingRules.platform_fee_markup_percent}%` : 'None'}
+- **Platform Markup:** ${pricingRules.platform_fee_markup_percent ? `${pricingRules.platform_fee_markup_percent}%` : 'None'}
 - **Final Base Price:** $${finalPrice}
-- **Travel Warning:** ${travelFees.warning || 'None'}
+- **Travel Warning:** ${travelFees.warning || 'None'}` : `
+- **No pricing rules configured - generate custom bid based on request details and training patterns**
+- **Training Average:** $${processedData.business_patterns.average_bid_amount.toFixed(2)}
+- **Travel Warning:** ${travelFees.warning || 'None'}`}
 
 ### CONSULTATION REQUIREMENTS:
 ${pricingRules?.require_consultation ? 'MUST include consultation call requirement.' : 'No consultation call required.'}
@@ -2477,7 +2501,8 @@ ${category === 'photography' ? `
 - Base pricing by service type (weddings, family, couples, portraits)
 - Common add-ons: Second shooter, engagement sessions, bridals, prints/albums, videography
 - Always mention consultation call requirement
-- Include travel disclaimer for engagements/bridals` : ''}
+- Include travel disclaimer for engagements/bridals
+${!pricingRules ? '- For graduation photography (3 hours): Consider $400-800 range based on location and requirements' : ''}` : ''}
 ${category === 'dj' ? `
 **DJ FOCUS:**
 - First hour premium, then hourly rate
@@ -2491,7 +2516,9 @@ ${category === 'videography' ? `
 - Bundle with photography when possible` : ''}
 
 ### CONVERSATION STARTER APPROACH:
-1. **BASE OFFER:** Use the calculated base price of $${finalPrice} as your starting point
+${pricingRules ? `
+1. **BASE OFFER:** Use the calculated base price of $${finalPrice} as your starting point` : `
+1. **BASE OFFER:** Generate a custom bid amount based on the specific request details, duration, location, and training patterns`}
 2. **UPSELL SUGGESTIONS:** Include 2-3 relevant add-ons as optional enhancements
 3. **CONSULTATION CALL:** ${pricingRules?.require_consultation ? 'MUST mention consultation call requirement' : 'Optional to mention'}
 4. **TRAVEL WARNING:** ${travelFees.warning ? `Include: "${travelFees.warning}"` : 'No travel warning needed'}
@@ -2507,10 +2534,10 @@ ${category === 'videography' ? `
 ### RETURN JSON FORMAT ONLY:
 \`\`\`json
 {
-  "bidAmount": ${finalPrice},
+  "bidAmount": ${pricingRules ? finalPrice : '<custom_amount_based_on_request>'},
   "bidDescription": "<conversation-starting bid with base offer and upsell suggestions>",
-  "pricingBreakdown": "Base Price: $${basePrice}\\nPlatform Markup: ${pricingRules?.platform_fee_markup_percent ? `${pricingRules.platform_fee_markup_percent}%` : 'None'}\\nTotal: $${finalPrice}",
-  "pricingReasoning": "<brief explanation of base pricing and upsell strategy>"
+  "pricingBreakdown": "${pricingRules ? `Base Price: $${basePrice}\\nPlatform Markup: ${pricingRules.platform_fee_markup_percent ? `${pricingRules.platform_fee_markup_percent}%` : 'None'}\\nTotal: $${finalPrice}` : 'Custom pricing based on request details and training patterns'}",
+  "pricingReasoning": "<brief explanation of pricing approach and upsell strategy>"
 }
 \`\`\`
 `;
