@@ -2787,3 +2787,253 @@ function calculateTravelFees(vendorLocation, eventLocation, travelConfig) {
     warning: travelConfig.travelWarning 
   };
 }
+
+// Rate limiters for Stripe account endpoints
+const rateLimit = require('express-rate-limit');
+const stripeAccountLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again later',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Authentication middleware using Supabase
+const authenticateUser = async (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  
+  if (!token) {
+    addLog('warn', 'Authentication failed - no token provided');
+    return res.status(401).json({ 
+      success: false,
+      error: 'Authentication required' 
+    });
+  }
+
+  try {
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    
+    if (error || !user) {
+      addLog('warn', 'Authentication failed - invalid token', { error });
+      return res.status(401).json({ 
+        success: false,
+        error: 'Invalid authentication token' 
+      });
+    }
+
+    // Add user info to request
+    req.user = user;
+    next();
+  } catch (error) {
+    addLog('error', 'Authentication error', { error: error.message });
+    return res.status(401).json({ 
+      success: false,
+      error: 'Authentication failed' 
+    });
+  }
+};
+
+// Middleware to validate Stripe account ID
+const validateStripeAccountId = (req, res, next) => {
+  const { accountId } = req.body;
+  
+  if (!accountId || typeof accountId !== 'string' || accountId.trim().length === 0) {
+    addLog('warn', 'Invalid account ID provided', { accountId });
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid account ID provided'
+    });
+  }
+  
+  // Sanitize the account ID
+  req.body.accountId = accountId.trim();
+  next();
+};
+
+/**
+ * Verify if a Stripe Connected Account is properly set up and active
+ * @route POST /api/stripe/verify-account
+ * @param {string} accountId - The Stripe account ID to verify
+ * @returns {Object} Response indicating if the account is valid with detailed status
+ */
+app.post('/api/stripe/verify-account',
+  stripeAccountLimiter,
+  authenticateUser,
+  validateStripeAccountId,
+  async (req, res) => {
+    try {
+      const { accountId } = req.body;
+      
+      // Log the verification attempt with user context
+      addLog('info', 'Verifying Stripe account', { 
+        accountId,
+        userId: req.user.id,
+        userEmail: req.user.email
+      });
+      
+      const account = await stripe.accounts.retrieve(accountId);
+      
+      const isValid = account && 
+                     account.details_submitted && 
+                     account.payouts_enabled &&
+                     (!account.requirements.currently_due || 
+                      account.requirements.currently_due.length === 0);
+      
+      // Enhanced status information
+      const status = {
+        success: true,
+        isValid,
+        details: {
+          detailsSubmitted: account.details_submitted,
+          payoutsEnabled: account.payouts_enabled,
+          chargesEnabled: account.charges_enabled,
+          pendingRequirements: account.requirements.currently_due || [],
+          accountStatus: account.charges_enabled ? 'active' : 'inactive',
+          disabledReason: account.requirements.disabled_reason || null
+        }
+      };
+      
+      // Log the verification result with enhanced details
+      addLog('info', 'Stripe account verification result', {
+        accountId,
+        userId: req.user.id,
+        isValid,
+        status: status.details.accountStatus,
+        details: status.details
+      });
+      
+      res.json(status);
+      
+    } catch (error) {
+      // Enhanced error logging with user context
+      addLog('error', 'Error verifying Stripe account', {
+        accountId: req.body.accountId,
+        userId: req.user.id,
+        error: error.message,
+        type: error.type,
+        stack: error.stack
+      });
+      
+      // Handle specific Stripe errors
+      if (error.type === 'StripeInvalidRequestError') {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid Stripe account ID',
+          isValid: false
+        });
+      }
+      
+      if (error.type === 'StripePermissionError') {
+        return res.status(403).json({
+          success: false,
+          error: 'Permission denied to access this Stripe account',
+          isValid: false
+        });
+      }
+      
+      res.status(500).json({
+        success: false,
+        error: 'Error verifying account',
+        isValid: false
+      });
+    }
+});
+
+/**
+ * Delete an incomplete or invalid Stripe Connected Account
+ * @route POST /api/stripe/delete-account
+ * @param {string} accountId - The Stripe account ID to delete
+ * @returns {Object} Response indicating if the deletion was successful
+ */
+app.post('/api/stripe/delete-account',
+  stripeAccountLimiter,
+  authenticateUser,
+  validateStripeAccountId,
+  async (req, res) => {
+    try {
+      const { accountId } = req.body;
+      
+      // Log the deletion attempt with user context
+      addLog('info', 'Deleting Stripe account', { 
+        accountId,
+        userId: req.user.id,
+        userEmail: req.user.email
+      });
+      
+      // First verify if the account exists and get its status
+      const account = await stripe.accounts.retrieve(accountId);
+      
+      // Enhanced validation for account deletion
+      if (account.details_submitted && account.payouts_enabled) {
+        const warningMessage = 'Attempted to delete complete Stripe account';
+        addLog('warn', warningMessage, { 
+          accountId,
+          userId: req.user.id,
+          accountStatus: account.charges_enabled ? 'active' : 'inactive'
+        });
+        
+        return res.status(403).json({
+          success: false,
+          error: 'Cannot delete a complete and active account',
+          details: {
+            accountStatus: account.charges_enabled ? 'active' : 'inactive',
+            detailsSubmitted: account.details_submitted,
+            payoutsEnabled: account.payouts_enabled
+          }
+        });
+      }
+      
+      // Proceed with deletion
+      await stripe.accounts.del(accountId);
+      
+      // Log successful deletion with context
+      addLog('info', 'Successfully deleted Stripe account', { 
+        accountId,
+        userId: req.user.id,
+        previousStatus: {
+          detailsSubmitted: account.details_submitted,
+          payoutsEnabled: account.payouts_enabled,
+          chargesEnabled: account.charges_enabled
+        }
+      });
+      
+      res.json({
+        success: true,
+        message: 'Account successfully deleted',
+        details: {
+          accountId,
+          deletedAt: new Date().toISOString()
+        }
+      });
+      
+    } catch (error) {
+      // Enhanced error logging with user context
+      addLog('error', 'Error deleting Stripe account', {
+        accountId: req.body.accountId,
+        userId: req.user.id,
+        error: error.message,
+        type: error.type,
+        stack: error.stack
+      });
+      
+      // Handle specific Stripe errors
+      if (error.type === 'StripeInvalidRequestError') {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid Stripe account ID'
+        });
+      }
+      
+      if (error.type === 'StripePermissionError') {
+        return res.status(403).json({
+          success: false,
+          error: 'Permission denied to delete this Stripe account'
+        });
+      }
+      
+      res.status(500).json({
+        success: false,
+        error: 'Error deleting account'
+      });
+    }
+});
