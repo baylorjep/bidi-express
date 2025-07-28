@@ -763,6 +763,95 @@ app.get('/check-account-capabilities/:accountId', async (req, res) => {
   }
 });
 
+// Simple endpoints for Stripe account verification and deletion (for frontend compatibility)
+app.post("/verify-account", async (req, res) => {
+  try {
+    const { accountId } = req.body;
+    
+    if (!accountId) {
+      return res.status(400).json({ error: "Account ID is required" });
+    }
+
+    console.log(`🔍 Verifying Stripe account: ${accountId}`);
+
+    // Retrieve the account from Stripe
+    const account = await stripe.accounts.retrieve(accountId);
+    
+    // Check if the account is valid and properly set up
+    const isValid = account && 
+                   account.details_submitted && 
+                   account.charges_enabled && 
+                   account.payouts_enabled;
+
+    console.log(`✅ Account verification result:`, {
+      accountId,
+      isValid,
+      details_submitted: account.details_submitted,
+      charges_enabled: account.charges_enabled,
+      payouts_enabled: account.payouts_enabled
+    });
+
+    res.json({ isValid });
+  } catch (error) {
+    console.error("❌ Error verifying account:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/delete-account", async (req, res) => {
+  try {
+    const { accountId } = req.body;
+    
+    if (!accountId) {
+      return res.status(400).json({ error: "Account ID is required" });
+    }
+
+    console.log(`🗑️ Deleting Stripe account: ${accountId}`);
+
+    // Delete the account from Stripe
+    const deletedAccount = await stripe.accounts.del(accountId);
+    
+    console.log(`✅ Account deleted successfully:`, {
+      accountId: deletedAccount.id,
+      deleted: deletedAccount.deleted
+    });
+
+    res.json({ 
+      success: true, 
+      message: "Account deleted successfully",
+      accountId: deletedAccount.id 
+    });
+  } catch (error) {
+    console.error("❌ Error deleting account:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Health check for Stripe connection
+app.get("/stripe-health", async (req, res) => {
+  try {
+    console.log("🏥 Performing Stripe health check...");
+    
+    // Test Stripe connection by making a simple API call
+    const balance = await stripe.balance.retrieve();
+    
+    console.log("✅ Stripe health check passed");
+    
+    res.json({ 
+      status: "healthy", 
+      stripe_connected: true,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error("❌ Stripe health check failed:", error);
+    res.status(500).json({ 
+      status: "unhealthy", 
+      stripe_connected: false,
+      error: error.message 
+    });
+  }
+});
+
 // Webhook for stripe
 // Your webhook secret from the Stripe Dashboard (calls on env file)
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -3076,4 +3165,45 @@ app.post('/api/stripe/delete-account',
         error: 'Error deleting account'
       });
     }
+});
+
+// Error handling middleware
+app.use((error, req, res, next) => {
+  console.error('❌ Unhandled error:', error);
+  
+  // Log the error with context
+  if (logStore && logStore.addLog) {
+    logStore.addLog('error', 'Unhandled server error', {
+      error: error.message,
+      stack: error.stack,
+      url: req.url,
+      method: req.method,
+      userAgent: req.get('User-Agent'),
+      ip: req.ip
+    });
+  }
+  
+  res.status(500).json({ 
+    error: 'Internal server error',
+    message: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
+  });
+});
+
+// 404 handler for unmatched routes
+app.use('*', (req, res) => {
+  console.log(`❌ 404 - Route not found: ${req.method} ${req.originalUrl}`);
+  
+  if (logStore && logStore.addLog) {
+    logStore.addLog('warn', '404 - Route not found', {
+      method: req.method,
+      url: req.originalUrl,
+      userAgent: req.get('User-Agent'),
+      ip: req.ip
+    });
+  }
+  
+  res.status(404).json({ 
+    error: 'Route not found',
+    message: `The requested route ${req.method} ${req.originalUrl} was not found`
+  });
 });
