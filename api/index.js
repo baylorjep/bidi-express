@@ -1502,6 +1502,22 @@ app.post('/api/autobid/generate-sample-bid', async (req, res) => {
     const generatedBid = await generateAIBidForTraining(trainingData, actualRequest, category, business_id);
     logger.info("✅ AI bid generated:", generatedBid);
 
+    // Validate generated bid has all required fields
+    if (!generatedBid || typeof generatedBid !== 'object') {
+      logger.error("❌ Generated bid is invalid:", generatedBid);
+      return res.status(500).json({ error: "Failed to generate valid bid" });
+    }
+
+    // Ensure all required fields exist
+    const validatedBid = {
+      amount: generatedBid.amount || 0,
+      description: generatedBid.description || 'No description available',
+      breakdown: generatedBid.breakdown || 'No breakdown available',
+      reasoning: generatedBid.reasoning || 'No reasoning available'
+    };
+
+    logger.info("✅ Validated bid:", validatedBid);
+
     // 3. Store AI bid in database
     // Get a random existing training request for this category to avoid always using the same one
     let requestId = actualRequest.id;
@@ -1536,18 +1552,24 @@ app.post('/api/autobid/generate-sample-bid', async (req, res) => {
       logger.info(`✅ Using deterministic training request with ID: ${requestId} (${selectedIndex + 1}/${trainingRequests.length})`);
     }
 
-    const aiResponse = await storeAIBid(business_id, requestId, generatedBid, category);
+    const aiResponse = await storeAIBid(business_id, requestId, validatedBid, category);
     logger.info("💾 AI bid stored with ID:", aiResponse.id);
 
-    res.json({
+    // Ensure all response fields are properly formatted
+    const responseData = {
       success: true,
-      generated_bid: generatedBid,
+      generated_bid: validatedBid,
       response_id: aiResponse.id,
-      amount: generatedBid.amount,
-      description: generatedBid.description,
-      breakdown: generatedBid.breakdown,
-      reasoning: generatedBid.reasoning
-        });
+      amount: validatedBid.amount,
+      description: validatedBid.description,
+      breakdown: validatedBid.breakdown,
+      reasoning: validatedBid.reasoning
+    };
+
+    // Log the response for debugging
+    console.log("📤 Sending response to frontend:", responseData);
+
+    res.json(responseData);
 
     } catch (error) {
     logger.error("❌ === GENERATE SAMPLE BID ROUTE FAILED ===");
@@ -2079,10 +2101,10 @@ async function storeAIBid(businessId, requestId, generatedBid, category) {
 async function updateTrainingProgress(businessId, trainingResponseId) {
   console.log(`📈 Updating training progress for Business ${businessId}`);
 
-  // Get the category from the training response
+  // Get the category and AI generation status from the training response
   const { data: response, error: responseError } = await supabase
     .from('autobid_training_responses')
-    .select('category')
+    .select('category, is_ai_generated')
     .eq('id', trainingResponseId)
     .single();
 
@@ -2091,10 +2113,12 @@ async function updateTrainingProgress(businessId, trainingResponseId) {
     return;
   }
 
+  console.log(`📊 Training response details: category=${response.category}, is_ai_generated=${response.is_ai_generated}`);
+
   // Get current progress first
   const { data: currentProgress, error: progressFetchError } = await supabase
     .from('autobid_training_progress')
-    .select('consecutive_approvals')
+    .select('consecutive_approvals, total_scenarios_completed, scenarios_approved')
     .eq('business_id', businessId)
     .eq('category', response.category)
     .single();
@@ -2111,7 +2135,8 @@ async function updateTrainingProgress(businessId, trainingResponseId) {
           business_id: businessId,
           category: response.category,
           consecutive_approvals: 1,
-          total_scenarios_completed: 1,
+          total_scenarios_completed: response.is_ai_generated ? 0 : 1, // Only increment for sample requests
+          scenarios_approved: response.is_ai_generated ? 1 : 0, // Only increment for AI bids
           training_completed: false,
           last_training_date: new Date().toISOString()
         });
@@ -2126,14 +2151,26 @@ async function updateTrainingProgress(businessId, trainingResponseId) {
     return;
   }
 
+  // Prepare update data based on whether it's an AI bid or sample request
+  const updateData = {
+    consecutive_approvals: (currentProgress?.consecutive_approvals || 0) + 1,
+    last_training_date: new Date().toISOString()
+  };
+
+  if (response.is_ai_generated) {
+    // For AI bids, only increment scenarios_approved
+    updateData.scenarios_approved = (currentProgress?.scenarios_approved || 0) + 1;
+    console.log(`📈 Incrementing scenarios_approved for AI bid`);
+  } else {
+    // For sample requests, only increment total_scenarios_completed
+    updateData.total_scenarios_completed = (currentProgress?.total_scenarios_completed || 0) + 1;
+    console.log(`📈 Incrementing total_scenarios_completed for sample request`);
+  }
+
   // Update existing progress
   const { error: progressError } = await supabase
     .from('autobid_training_progress')
-    .update({
-      consecutive_approvals: (currentProgress?.consecutive_approvals || 0) + 1,
-      total_scenarios_completed: (currentProgress?.total_scenarios_completed || 0) + 1,
-      last_training_date: new Date().toISOString()
-    })
+    .update(updateData)
     .eq('business_id', businessId)
     .eq('category', response.category);
 
