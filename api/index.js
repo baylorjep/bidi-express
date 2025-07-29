@@ -11,7 +11,6 @@ const { generateAutoBidForBusiness } = require('./Autobid');
 const googleCalendarRoutes = require('./google-calendar/routes');
 const googlePlacesRoutes = require('./google-places/routes');
 const authRoutes = require('./auth/routes');
-const resend = new Resend(process.env.RESEND_API_KEY);
 const http = require("http");
 const { Server } = require("socket.io");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY,
@@ -3206,4 +3205,408 @@ app.use('*', (req, res) => {
     error: 'Route not found',
     message: `The requested route ${req.method} ${req.originalUrl} was not found`
   });
+});
+
+// Email templates for payment receipts
+const customerEmailTemplate = ({ amount, businessName, paymentType, date, customerName }) => {
+  const formattedAmount = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD'
+  }).format(amount);
+
+  const paymentTypeText = paymentType === 'full' ? 'Full Payment' : 'Down Payment';
+
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Payment Receipt</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+          }
+          .header {
+            text-align: center;
+            margin-bottom: 30px;
+          }
+          .logo {
+            max-width: 150px;
+            height: auto;
+          }
+          .receipt-details {
+            background: #f9f9f9;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+          }
+          .detail-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+          }
+          .thank-you {
+            text-align: center;
+            color: #666;
+            margin-top: 30px;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <img src="https://i.imgur.com/LBdztzj.png" alt="Bidi Logo" class="logo">
+          <h1>Payment Receipt</h1>
+        </div>
+        
+        <div class="receipt-details">
+          <div class="detail-row">
+            <strong>Paid To:</strong>
+            <span>${businessName}</span>
+          </div>
+          <div class="detail-row">
+            <strong>Amount:</strong>
+            <span>${formattedAmount}</span>
+          </div>
+          <div class="detail-row">
+            <strong>Payment Type:</strong>
+            <span>${paymentTypeText}</span>
+          </div>
+          <div class="detail-row">
+            <strong>Date:</strong>
+            <span>${new Date(date).toLocaleString()}</span>
+          </div>
+        </div>
+
+        <div class="thank-you">
+          <p>Thank you for using Bidi! We appreciate your business.</p>
+          <p>If you have any questions, please don't hesitate to contact us.</p>
+        </div>
+      </body>
+    </html>
+  `;
+};
+
+const businessEmailTemplate = ({ amount, paymentType, date, customerName, fees, finalAmount, stripeLoginUrl }) => {
+  const formattedAmount = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD'
+  }).format(amount);
+
+  const formattedFees = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD'
+  }).format(fees);
+
+  const formattedFinalAmount = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD'
+  }).format(finalAmount);
+
+  const paymentTypeText = paymentType === 'full' ? 'Full Payment' : 'Down Payment';
+
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>New Payment Received</title>
+                  <style>
+            body {
+              font-family: Arial, sans-serif;
+              line-height: 1.6;
+              color: #333;
+              margin: 0;
+              padding: 0;
+              -webkit-text-size-adjust: 100%;
+              -ms-text-size-adjust: 100%;
+            }
+            .email-container {
+              max-width: 600px;
+              margin: 0 auto;
+              padding: 20px;
+              background-color: #ffffff;
+            }
+            .header {
+              text-align: center;
+              padding: 20px 0;
+              margin-bottom: 30px;
+            }
+            .logo {
+              max-width: 150px;
+              height: auto;
+              display: inline-block;
+            }
+            .payment-details {
+              background: #f9f9f9;
+              border-radius: 8px;
+              padding: 20px;
+              margin-bottom: 30px;
+              width: 100%;
+              box-sizing: border-box;
+            }
+            .detail-row {
+              display: flex;
+              justify-content: space-between;
+              margin-bottom: 10px;
+              border-bottom: 1px solid #eee;
+              padding-bottom: 10px;
+              flex-wrap: wrap;
+            }
+            .detail-row strong {
+              margin-right: 10px;
+            }
+            .fee-breakdown {
+              background: #fff3cd;
+              border: 1px solid #ffeeba;
+              border-radius: 4px;
+              padding: 15px;
+              margin: 20px 0;
+              width: 100%;
+              box-sizing: border-box;
+            }
+            .final-amount {
+              font-size: 1.2em;
+              font-weight: bold;
+              color: #28a745;
+              text-align: center;
+              padding: 15px;
+              background: #f8f9fa;
+              border-radius: 4px;
+              margin: 20px 0;
+              width: 100%;
+              box-sizing: border-box;
+            }
+            .button {
+              display: inline-block;
+              padding: 12px 24px;
+              background-color: #635bff;
+              color: white !important;
+              text-decoration: none;
+              border-radius: 5px;
+              margin-top: 20px;
+              text-align: center;
+              font-weight: 500;
+            }
+            .button-container {
+              text-align: center;
+              margin: 30px 0;
+              color: white;
+            }
+            @media only screen and (max-width: 480px) {
+              .email-container {
+                padding: 10px;
+              }
+              .detail-row {
+                flex-direction: column;
+              }
+              .detail-row strong {
+                margin-bottom: 5px;
+              }
+            }
+        </style>
+      </head>
+              <body>
+          <div class="email-container">
+            <div class="header">
+              <img src="https://i.imgur.com/LBdztzj.png" alt="Bidi Logo" class="logo">
+              <h1>New Payment Received!</h1>
+            </div>
+        
+        <div class="payment-details">
+          <div class="detail-row">
+            <strong>Paid By:</strong>
+            <span>${customerName}</span>
+          </div>
+          <div class="detail-row">
+            <strong>Amount Received:</strong>
+            <span>${formattedAmount}</span>
+          </div>
+          <div class="detail-row">
+            <strong>Payment Type:</strong>
+            <span>${paymentTypeText}</span>
+          </div>
+          <div class="detail-row">
+            <strong>Date:</strong>
+            <span>${new Date(date).toLocaleString()}</span>
+          </div>
+        </div>
+
+        <div class="fee-breakdown">
+          <h3 style="margin-top: 0;">Payment Breakdown</h3>
+          <div class="detail-row">
+            <strong>Total Payment:</strong>
+            <span>${formattedAmount}</span>
+          </div>
+          <div class="detail-row">
+            <strong>Bidi Fee (10%):</strong>
+            <span>-${formattedFees}</span>
+          </div>
+        </div>
+
+        <div class="final-amount">
+          <div>Amount to be deposited to your account:</div>
+          <div style="font-size: 1.4em; margin-top: 10px;">${formattedFinalAmount}</div>
+        </div>
+
+                  <div class="button-container">
+            <a href="${stripeLoginUrl}" class="button">View in Stripe Dashboard →</a>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+};
+
+// Validation middleware for payment receipt request
+const validatePaymentReceiptRequest = (req, res, next) => {
+  const { customerEmail, businessEmail, amount, paymentType, businessName, date, customerName, connectedAccountId } = req.body;
+
+  // Check required fields
+  if (!customerEmail || !businessEmail || !amount || !paymentType || !businessName || !date || !customerName || !connectedAccountId) {
+    return res.status(400).json({
+      error: 'Missing required fields',
+      message: 'Please provide all required fields: customerEmail, businessEmail, amount, paymentType, businessName, date, customerName, connectedAccountId'
+    });
+  }
+
+  // Validate email formats
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(customerEmail) || !emailRegex.test(businessEmail)) {
+    return res.status(400).json({
+      error: 'Invalid email format',
+      message: 'Please provide valid email addresses'
+    });
+  }
+
+  // Validate amount
+  if (typeof amount !== 'number' || amount <= 0) {
+    return res.status(400).json({
+      error: 'Invalid amount',
+      message: 'Amount must be a positive number'
+    });
+  }
+
+  // Validate payment type
+  if (!['full', 'down'].includes(paymentType)) {
+    return res.status(400).json({
+      error: 'Invalid payment type',
+      message: 'Payment type must be either "full" or "down"'
+    });
+  }
+
+  // Validate date
+  if (isNaN(Date.parse(date))) {
+    return res.status(400).json({
+      error: 'Invalid date format',
+      message: 'Please provide a valid date string'
+    });
+  }
+
+  next();
+};
+
+// Payment receipt email endpoint
+app.post('/send-payment-receipts', validatePaymentReceiptRequest, async (req, res) => {
+  try {
+    const { customerEmail, businessEmail, amount, paymentType, businessName, date, customerName, connectedAccountId } = req.body;
+
+    // Calculate fees and final amount
+    const fees = amount * 0.10; // 10% fee
+    const finalAmount = amount - fees;
+
+    // Get Stripe login link
+    let stripeLoginUrl;
+    try {
+      const response = await fetch(
+        "https://bidi-express.vercel.app/create-login-link",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ accountId: connectedAccountId }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to create Stripe login link');
+      }
+
+      const data = await response.json();
+      stripeLoginUrl = data.url;
+    } catch (error) {
+      console.error('Error creating Stripe login link:', error);
+      stripeLoginUrl = 'https://dashboard.stripe.com'; // Fallback URL
+    }
+
+    // Log the request
+    logStore.addLog('info', 'Sending payment receipt emails', {
+      customerEmail,
+      businessEmail,
+      amount,
+      paymentType,
+      businessName,
+      customerName,
+      fees,
+      finalAmount
+    });
+
+    // Send customer receipt
+    await resend.emails.send({
+      from: 'receipts@bidi.com',
+      to: customerEmail,
+      subject: `Payment Receipt for ${businessName}`,
+      html: customerEmailTemplate({ amount, businessName, paymentType, date, customerName })
+    });
+
+    // Send business notification
+    await resend.emails.send({
+      from: 'notifications@bidi.com',
+      to: businessEmail,
+      subject: 'New Payment Received',
+      html: businessEmailTemplate({ 
+        amount, 
+        paymentType, 
+        date, 
+        customerName,
+        fees,
+        finalAmount,
+        stripeLoginUrl
+      })
+    });
+
+    // Log success
+    logStore.addLog('info', 'Payment receipt emails sent successfully', {
+      customerEmail,
+      businessEmail
+    });
+
+    res.json({ 
+      success: true,
+      message: 'Payment receipt emails sent successfully'
+    });
+
+  } catch (error) {
+    // Log error
+    logStore.addLog('error', 'Failed to send payment receipt emails', {
+      error: error.message,
+      stack: error.stack
+    });
+
+    console.error('Error sending payment receipt emails:', error);
+
+    res.status(500).json({ 
+      error: 'Failed to send emails',
+      message: 'An error occurred while sending the payment receipt emails'
+    });
+  }
 });
