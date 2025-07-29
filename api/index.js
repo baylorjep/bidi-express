@@ -1312,6 +1312,15 @@ app.post('/trigger-autobid', async (req, res) => {
     try {
         logger.info(`🆕 Auto-bid triggered for Request ID: ${request_id}`);
 
+        // Check for duplicate requests to prevent spam
+        const requestKey = `production-${request_id}`;
+        if (isDuplicateRequest('production', 'autobid', { request_id })) {
+            logger.warn("⚠️ Duplicate production autobid request detected");
+            return res.status(429).json({ 
+                error: "Duplicate request detected. Please wait a moment before trying again." 
+            });
+        }
+
       // Helper function to determine the correct table name based on category
       const getTableNameForCategory = (category) => {
           const categoryMap = {
@@ -1489,23 +1498,168 @@ app.post('/trigger-autobid', async (req, res) => {
 
         for (const business of eligibleBusinesses) {
         logger.info(`🤖 Generating auto-bid for business: ${business.id}`);
-                const autoBid = await generateAutoBidForBusiness(business.id, requestDetails);
-                if (autoBid) {
-                    logger.info(`✅ Auto-bid generated for Business ${business.id}:`, autoBid);
+                
+                // Double-check that business still has autobid enabled and is active
+                const { data: currentBusiness, error: businessCheckError } = await supabase
+                    .from("business_profiles")
+                    .select("id, autobid_enabled, business_category, status")
+                    .eq("id", business.id)
+                    .single();
+
+                if (businessCheckError || !currentBusiness) {
+                    logger.warn(`⚠️ Business ${business.id} no longer exists or has errors. Skipping.`);
                     bidsGenerated.push({
                         business_id: business.id,
-                        bid_amount: autoBid.bidAmount,
-                        bid_description: autoBid.bidDescription,
-            });
-        } else {
-            logger.error(`❌ Failed to generate auto-bid for Business ${business.id}`);
-        }
+                        status: "business_not_found",
+                        error: businessCheckError?.message || "Business not found"
+                    });
+                    continue;
+                }
+
+                if (!currentBusiness.autobid_enabled) {
+                    logger.warn(`⚠️ Business ${business.id} has autobid disabled. Skipping.`);
+                    bidsGenerated.push({
+                        business_id: business.id,
+                        status: "autobid_disabled"
+                    });
+                    continue;
+                }
+
+                if (currentBusiness.status === 'inactive' || currentBusiness.status === 'suspended') {
+                    logger.warn(`⚠️ Business ${business.id} is inactive (status: ${currentBusiness.status}). Skipping.`);
+                    bidsGenerated.push({
+                        business_id: business.id,
+                        status: "business_inactive",
+                        business_status: currentBusiness.status
+                    });
+                    continue;
+                }
+                
+                try {
+                    // Use the same enhanced approach as sample generation for consistency
+                    const trainingData = await getBusinessTrainingData(business.id, requestDetails.service_category);
+                    logger.info(`📊 Retrieved ${trainingData.responses?.length || 0} training responses for business ${business.id}`);
+                    
+                    // Check if business has sufficient training data for accurate production bids
+                    if (!trainingData.responses || trainingData.responses.length < 3) {
+                        logger.warn(`⚠️ Business ${business.id} has insufficient training data (${trainingData.responses?.length || 0} responses). Skipping production bid.`);
+                        bidsGenerated.push({
+                            business_id: business.id,
+                            status: "insufficient_training_data",
+                            training_responses_count: trainingData.responses?.length || 0,
+                            message: "Business needs at least 3 training responses for production bids"
+                        });
+                        continue;
+                    }
+                    
+                    // Check if business has pricing rules configured for accurate production bids
+                    const { data: pricingRulesData, error: pricingError } = await supabase
+                        .from("business_pricing_rules")
+                        .select("*")
+                        .eq("business_id", business.id)
+                        .eq("category", requestDetails.service_category)
+                        .order("created_at", { ascending: false })
+                        .limit(1);
+
+                    if (pricingError) {
+                        logger.warn(`⚠️ Error fetching pricing rules for Business ${business.id}:`, pricingError.message);
+                    }
+
+                    if (!pricingRulesData || pricingRulesData.length === 0) {
+                        logger.warn(`⚠️ Business ${business.id} has no pricing rules configured for ${requestDetails.service_category}. Skipping production bid.`);
+                        bidsGenerated.push({
+                            business_id: business.id,
+                            status: "no_pricing_rules",
+                            message: "Business needs pricing rules configured for production bids"
+                        });
+                        continue;
+                    }
+
+                    // Generate bid using the same logic as sample generation
+                    const generatedBid = await generateAIBidForTraining(trainingData, requestDetails, requestDetails.service_category, business.id);
+                
+                    if (generatedBid) {
+                        logger.info(`✅ Auto-bid generated for Business ${business.id}:`, generatedBid);
+                        
+                        // Store the bid in the production bids table
+                        const { error: insertError } = await supabase
+                            .from("bids")
+                            .insert([
+                                {
+                                    request_id: requestDetails.id,
+                                    user_id: business.id,
+                                    bid_amount: generatedBid.amount,
+                                    bid_description: generatedBid.description,
+                                    category: requestDetails.service_category === 'photography' || requestDetails.service_category === 'videography' ? 'Photography' : 'General',
+                                    status: "pending",
+                                    hidden: null
+                                },
+                            ]);
+
+                        if (insertError) {
+                            logger.error(`❌ Error inserting bid for Business ${business.id}:`, insertError.message);
+                            bidsGenerated.push({
+                                business_id: business.id,
+                                bid_amount: generatedBid.amount,
+                                bid_description: generatedBid.description,
+                                status: "generated_but_not_stored",
+                                error: insertError.message
+                            });
+                        } else {
+                            logger.info(`💾 Bid successfully stored for Business ${business.id}`);
+                            bidsGenerated.push({
+                                business_id: business.id,
+                                bid_amount: generatedBid.amount,
+                                bid_description: generatedBid.description,
+                                status: "successfully_stored"
+                            });
+                        }
+                    } else {
+                        logger.error(`❌ Failed to generate auto-bid for Business ${business.id}`);
+                        bidsGenerated.push({
+                            business_id: business.id,
+                            status: "generation_failed"
+                        });
+                    }
+                } catch (businessError) {
+                    logger.error(`❌ Error processing business ${business.id}:`, businessError.message);
+                    bidsGenerated.push({
+                        business_id: business.id,
+                        status: "error",
+                        error: businessError.message
+                    });
+                }
       }
 
       logger.info("✅ === TRIGGER-AUTOBID ROUTE COMPLETED SUCCESSFULLY ===");
+      
+      // Calculate detailed statistics
+      const successfulBids = bidsGenerated.filter(bid => bid.status === "successfully_stored").length;
+      const failedBids = bidsGenerated.filter(bid => bid.status === "generation_failed").length;
+      const insufficientTraining = bidsGenerated.filter(bid => bid.status === "insufficient_training_data").length;
+      const noPricingRules = bidsGenerated.filter(bid => bid.status === "no_pricing_rules").length;
+      const storageErrors = bidsGenerated.filter(bid => bid.status === "generated_but_not_stored").length;
+      const otherErrors = bidsGenerated.filter(bid => bid.status === "error").length;
+      const businessNotFound = bidsGenerated.filter(bid => bid.status === "business_not_found").length;
+      const autobidDisabled = bidsGenerated.filter(bid => bid.status === "autobid_disabled").length;
+      const businessInactive = bidsGenerated.filter(bid => bid.status === "business_inactive").length;
+      
       res.status(200).json({
-          message: "Auto-bids generated successfully (LOG ONLY, NO INSERTION)",
+          message: "Auto-bids processed successfully",
           bids: bidsGenerated,
+          statistics: {
+              total_businesses_processed: eligibleBusinesses.length,
+              successful_bids: successfulBids,
+              failed_bids: failedBids,
+              insufficient_training_data: insufficientTraining,
+              no_pricing_rules: noPricingRules,
+              storage_errors: storageErrors,
+              other_errors: otherErrors,
+              business_not_found: businessNotFound,
+              autobid_disabled: autobidDisabled,
+              business_inactive: businessInactive
+          },
+          summary: `${successfulBids} bids generated and stored, ${failedBids + insufficientTraining + noPricingRules + businessNotFound + autobidDisabled + businessInactive} businesses skipped due to insufficient setup or inactive status`
       });
 
             } catch (error) {
