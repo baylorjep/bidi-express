@@ -690,21 +690,31 @@ app.post("/account_session", async (req, res) => {
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     // Validate request body
-    if (!req.body || !req.body.account) {
-      console.error("Missing account in request body:", req.body);
+    if (!req.body) {
+      console.error("No request body received");
       return res.status(400).json({ 
-        error: "Account ID is required",
+        error: "Request body is required",
         received: req.body 
       });
     }
 
-    console.log("Creating account session for account:", req.body.account);
+    // Check for account in different possible locations
+    const accountId = req.body.account || req.body.accountId || req.body.account_id;
+    if (!accountId) {
+      console.error("Missing account in request body:", req.body);
+      return res.status(400).json({ 
+        error: "Account ID is required (account, accountId, or account_id)",
+        received: req.body 
+      });
+    }
+
+    console.log("Creating account session for account:", accountId);
 
     let accountSession;
     try {
       // Try account sessions first (newer API)
       accountSession = await stripe.accountSessions.create({
-        account: req.body.account,
+        account: accountId,
         components: {
           account_onboarding: { enabled: true },
         },
@@ -717,7 +727,7 @@ app.post("/account_session", async (req, res) => {
       // Fallback to account links (older API)
       try {
         const accountLink = await stripe.accountLinks.create({
-          account: req.body.account,
+          account: accountId,
           refresh_url: 'https://www.savewithbidi.com/payment-setup',
           return_url: 'https://www.savewithbidi.com/payment-setup',
           type: 'account_onboarding',
@@ -768,22 +778,32 @@ app.post("/account", async (req, res) => {
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     // Validate request body
-    if (!req.body || !req.body.email) {
-      console.error("Missing email in request body:", req.body);
+    if (!req.body) {
+      console.error("No request body received");
       return res.status(400).json({ 
-        error: "Email is required",
+        error: "Request body is required",
         received: req.body 
       });
     }
 
-    console.log("Creating Stripe account for email:", req.body.email);
+    // Check for email in different possible locations
+    const email = req.body.email || req.body.userEmail || req.body.user_email;
+    if (!email) {
+      console.error("Missing email in request body:", req.body);
+      return res.status(400).json({ 
+        error: "Email is required (email, userEmail, or user_email)",
+        received: req.body 
+      });
+    }
+
+    console.log("Creating Stripe account for email:", email);
 
     let account;
     try {
       account = await stripe.accounts.create({
         type: "express",
         country: "US", // Adjust if needed
-        email: req.body.email,
+        email: email,
       });
 
       console.log("Stripe account created successfully:", account.id);
