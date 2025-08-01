@@ -96,9 +96,14 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/account', (req, res, next) => {
   console.log('Account endpoint request:', {
     method: req.method,
-    headers: req.headers,
+    headers: {
+      'content-type': req.headers['content-type'],
+      'origin': req.headers['origin'],
+      'user-agent': req.headers['user-agent']
+    },
     body: req.body,
-    url: req.url
+    url: req.url,
+    contentType: req.get('Content-Type')
   });
   next();
 });
@@ -106,9 +111,14 @@ app.use('/account', (req, res, next) => {
 app.use('/account_session', (req, res, next) => {
   console.log('Account session endpoint request:', {
     method: req.method,
-    headers: req.headers,
+    headers: {
+      'content-type': req.headers['content-type'],
+      'origin': req.headers['origin'],
+      'user-agent': req.headers['user-agent']
+    },
     body: req.body,
-    url: req.url
+    url: req.url,
+    contentType: req.get('Content-Type')
   });
   next();
 });
@@ -694,9 +704,18 @@ app.post("/account_session", async (req, res) => {
       console.error("No request body received");
       return res.status(400).json({ 
         error: "Request body is required",
-        received: req.body 
+        received: req.body,
+        contentType: req.get('Content-Type')
       });
     }
+
+    // Log the request details for debugging
+    console.log("Account session request details:", {
+      contentType: req.get('Content-Type'),
+      body: req.body,
+      bodyType: typeof req.body,
+      bodyKeys: req.body ? Object.keys(req.body) : 'no body'
+    });
 
     // Check for account in different possible locations
     const accountId = req.body.account || req.body.accountId || req.body.account_id;
@@ -782,9 +801,18 @@ app.post("/account", async (req, res) => {
       console.error("No request body received");
       return res.status(400).json({ 
         error: "Request body is required",
-        received: req.body 
+        received: req.body,
+        contentType: req.get('Content-Type')
       });
     }
+
+    // Log the request details for debugging
+    console.log("Account request details:", {
+      contentType: req.get('Content-Type'),
+      body: req.body,
+      bodyType: typeof req.body,
+      bodyKeys: req.body ? Object.keys(req.body) : 'no body'
+    });
 
     // Check for email in different possible locations
     const email = req.body.email || req.body.userEmail || req.body.user_email;
