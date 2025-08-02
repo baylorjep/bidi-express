@@ -6,6 +6,7 @@ const express = require("express");
 const cors = require("cors"); 
 const bodyParser = require('body-parser');
 const { Resend } = require('resend');
+const resend = new Resend(process.env.RESEND_API_KEY);
 const supabase = require('./supabaseClient');
 const { generateAutoBidForBusiness } = require('./Autobid');
 const googleCalendarRoutes = require('./google-calendar/routes');
@@ -42,6 +43,8 @@ const corsOptions = {
     const allowedOrigins = [
       'https://www.savewithbidi.com',
       'https://savewithbidi.com',
+      'https://www.bidievents.com',
+      'https://bidievents.com',
       'http://localhost:3000'
     ];
     
