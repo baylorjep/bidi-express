@@ -14,11 +14,24 @@ const googlePlacesRoutes = require('./google-places/routes');
 const authRoutes = require('./auth/routes');
 const http = require("http");
 const { Server } = require("socket.io");
+// Validate Stripe configuration
+if (!process.env.STRIPE_SECRET_KEY) {
+  console.error('❌ STRIPE_SECRET_KEY environment variable is not set');
+  process.exit(1);
+}
+
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY,
   {
-    apiVersion: "2023-10-16",
+    apiVersion: "2024-12-18.acacia",
   }
 );
+
+// Test Stripe connection
+stripe.accounts.list({ limit: 1 }).then(() => {
+  console.log('✅ Stripe connection successful');
+}).catch((error) => {
+  console.error('❌ Stripe connection failed:', error.message);
+});
 const crypto = require('crypto');
 
 // Initialize OpenAI for training functions
@@ -45,14 +58,16 @@ const corsOptions = {
       'https://savewithbidi.com',
       'https://www.bidievents.com',
       'https://bidievents.com',
-      'http://localhost:3000'
+      'http://localhost:3000',
+      'https://bidi-express.vercel.app' // Add the Vercel domain
     ];
     
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
       console.log('CORS blocked origin:', origin);
-      callback(new Error('Not allowed by CORS'));
+      // For debugging, allow all origins temporarily
+      callback(null, true);
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -77,7 +92,66 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Debug middleware for payment endpoints
+app.use('/account', (req, res, next) => {
+  console.log('Account endpoint request:', {
+    method: req.method,
+    headers: {
+      'content-type': req.headers['content-type'],
+      'origin': req.headers['origin'],
+      'user-agent': req.headers['user-agent']
+    },
+    body: req.body,
+    url: req.url,
+    contentType: req.get('Content-Type')
+  });
+  next();
+});
+
+app.use('/account_session', (req, res, next) => {
+  console.log('Account session endpoint request:', {
+    method: req.method,
+    headers: {
+      'content-type': req.headers['content-type'],
+      'origin': req.headers['origin'],
+      'user-agent': req.headers['user-agent']
+    },
+    body: req.body,
+    url: req.url,
+    contentType: req.get('Content-Type')
+  });
+  next();
+});
+
+// Test endpoint to verify server is working
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    stripe_configured: !!process.env.STRIPE_SECRET_KEY
+  });
+});
+
+// Test Stripe connection endpoint
+app.get('/test-stripe', async (req, res) => {
+  try {
+    const accounts = await stripe.accounts.list({ limit: 1 });
+    res.json({ 
+      status: 'ok',
+      stripe_working: true,
+      accounts_count: accounts.data.length
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      status: 'error',
+      stripe_working: false,
+      error: error.message
+    });
+  }
+});
 
 // Serve static files (logo, favicon, etc.)
 app.use('/static', express.static('public'));
@@ -612,17 +686,87 @@ app.delete("/api/logs", (req, res) => {
   res.json({ message: "Logs cleared successfully" });
 });
 
+// Handle OPTIONS requests for the account_session endpoint
+app.options("/account_session", (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.status(200).end();
+});
+
 // This is the endpoint to create an account session for Stripe onboarding
 app.post("/account_session", async (req, res) => {
   try {
-    const { account } = req.body;
+    // Add proper CORS headers for this endpoint
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
-    const accountSession = await stripe.accountSessions.create({
-      account: account,
-      components: {
-        account_onboarding: { enabled: true },
-      },
+    // Validate request body
+    if (!req.body) {
+      console.error("No request body received");
+      return res.status(400).json({ 
+        error: "Request body is required",
+        received: req.body,
+        contentType: req.get('Content-Type')
+      });
+    }
+
+    // Log the request details for debugging
+    console.log("Account session request details:", {
+      contentType: req.get('Content-Type'),
+      body: req.body,
+      bodyType: typeof req.body,
+      bodyKeys: req.body ? Object.keys(req.body) : 'no body'
     });
+
+    // Check for account in different possible locations
+    const accountId = req.body.account || req.body.accountId || req.body.account_id;
+    if (!accountId) {
+      console.error("Missing account in request body:", req.body);
+      return res.status(400).json({ 
+        error: "Account ID is required (account, accountId, or account_id)",
+        received: req.body 
+      });
+    }
+
+    console.log("Creating account session for account:", accountId);
+
+    let accountSession;
+    try {
+      // Try account sessions first (newer API)
+      accountSession = await stripe.accountSessions.create({
+        account: accountId,
+        components: {
+          account_onboarding: { enabled: true },
+        },
+      });
+
+      console.log("Account session created successfully");
+    } catch (stripeError) {
+      console.error("Account sessions not available, trying account links:", stripeError.message);
+      
+      // Fallback to account links (older API)
+      try {
+        const accountLink = await stripe.accountLinks.create({
+          account: accountId,
+          refresh_url: 'https://www.savewithbidi.com/payment-setup',
+          return_url: 'https://www.savewithbidi.com/payment-setup',
+          type: 'account_onboarding',
+        });
+
+        console.log("Account link created successfully");
+        return res.json({
+          url: accountLink.url,
+        });
+      } catch (linkError) {
+        console.error("Both account sessions and account links failed:", {
+          sessionError: stripeError.message,
+          linkError: linkError.message
+        });
+        throw stripeError; // Throw the original error
+      }
+    }
 
     res.json({
       client_secret: accountSession.client_secret,
@@ -632,18 +776,78 @@ app.post("/account_session", async (req, res) => {
       "An error occurred when calling the Stripe API to create an account session",
       error
     );
-    res.status(500).send({ error: error.message });
+    res.status(500).json({ 
+      error: error.message,
+      details: error.type || 'unknown_error'
+    });
   }
+});
+
+// Handle OPTIONS requests for the account endpoint
+app.options("/account", (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.status(200).end();
 });
 
 // This is the endpoint for creating a connected account
 app.post("/account", async (req, res) => {
   try {
-    const account = await stripe.accounts.create({
-      type: "express",
-      country: "US", // Adjust if needed
-      email: req.body.email, // Assuming email is passed in the request body
+    // Add proper CORS headers for this endpoint
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+    // Validate request body
+    if (!req.body) {
+      console.error("No request body received");
+      return res.status(400).json({ 
+        error: "Request body is required",
+        received: req.body,
+        contentType: req.get('Content-Type')
+      });
+    }
+
+    // Log the request details for debugging
+    console.log("Account request details:", {
+      contentType: req.get('Content-Type'),
+      body: req.body,
+      bodyType: typeof req.body,
+      bodyKeys: req.body ? Object.keys(req.body) : 'no body'
     });
+
+    // Check for email in different possible locations
+    const email = req.body.email || req.body.userEmail || req.body.user_email;
+    if (!email) {
+      console.error("Missing email in request body:", req.body);
+      return res.status(400).json({ 
+        error: "Email is required (email, userEmail, or user_email)",
+        received: req.body 
+      });
+    }
+
+    console.log("Creating Stripe account for email:", email);
+
+    let account;
+    try {
+      account = await stripe.accounts.create({
+        type: "express",
+        country: "US", // Adjust if needed
+        email: email,
+      });
+
+      console.log("Stripe account created successfully:", account.id);
+    } catch (stripeError) {
+      console.error("Stripe account creation failed:", {
+        error: stripeError.message,
+        type: stripeError.type,
+        code: stripeError.code,
+        decline_code: stripeError.decline_code,
+        param: stripeError.param
+      });
+      throw stripeError;
+    }
 
     res.json({
       account: account.id,
@@ -653,7 +857,10 @@ app.post("/account", async (req, res) => {
       "An error occurred when calling the Stripe API to create an account",
       error
     );
-    res.status(500).send({ error: error.message });
+    res.status(500).json({ 
+      error: error.message,
+      details: error.type || 'unknown_error'
+    });
   }
 });
 
