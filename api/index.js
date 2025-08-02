@@ -3831,6 +3831,128 @@ const businessEmailTemplate = ({ amount, paymentType, date, customerName, fees, 
 };
 
 // Validation middleware for payment receipt request
+/**
+ * Fetch Stripe dashboard data for a connected account
+ * @route POST /api/stripe-dashboard
+ * @param {string} accountId - The Stripe Connect account ID
+ * @returns {Object} Dashboard data including balance, payouts, charges, and account status
+ */
+app.post('/api/stripe-dashboard',
+  stripeAccountLimiter,
+  authenticateUser,
+  validateStripeAccountId,
+  async (req, res) => {
+    try {
+      const { accountId } = req.body;
+
+      // Log the dashboard data request
+      addLog('info', 'Fetching Stripe dashboard data', {
+        accountId,
+        userId: req.user.id,
+        userEmail: req.user.email
+      });
+
+      // Fetch all required data in parallel
+      const [
+        balance,
+        payouts,
+        charges,
+        account
+      ] = await Promise.all([
+        stripe.balance.retrieve({ stripeAccount: accountId }),
+        stripe.payouts.list({ 
+          limit: 10,
+          stripeAccount: accountId
+        }),
+        stripe.charges.list({
+          limit: 10,
+          stripeAccount: accountId
+        }),
+        stripe.accounts.retrieve(accountId)
+      ]);
+
+      // Format the response according to the specified structure
+      const response = {
+        balance: {
+          available: balance.available.map(({ amount, currency }) => ({
+            amount,
+            currency
+          })),
+          pending: balance.pending.map(({ amount, currency }) => ({
+            amount,
+            currency
+          }))
+        },
+        payouts: payouts.data.map(payout => ({
+          id: payout.id,
+          amount: payout.amount,
+          status: payout.status,
+          created: payout.created
+        })),
+        charges: charges.data.map(charge => ({
+          id: charge.id,
+          amount: charge.amount,
+          status: charge.status,
+          created: charge.created
+        })),
+        account_status: {
+          charges_enabled: account.charges_enabled,
+          payouts_enabled: account.payouts_enabled,
+          requirements: {
+            currently_due: account.requirements.currently_due || [],
+            pending_verification: account.requirements.pending_verification || []
+          }
+        }
+      };
+
+      // Log successful response
+      addLog('info', 'Successfully fetched Stripe dashboard data', {
+        accountId,
+        userId: req.user.id,
+        balanceCount: response.balance.available.length,
+        payoutsCount: response.payouts.length,
+        chargesCount: response.charges.length
+      });
+
+      res.json({
+        success: true,
+        ...response
+      });
+
+    } catch (error) {
+      // Log the error with context
+      addLog('error', 'Error fetching Stripe dashboard data', {
+        accountId: req.body.accountId,
+        userId: req.user.id,
+        error: error.message,
+        type: error.type,
+        stack: error.stack
+      });
+
+      // Handle specific Stripe errors
+      if (error.type === 'StripeInvalidRequestError') {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid Stripe account ID'
+        });
+      }
+
+      if (error.type === 'StripePermissionError') {
+        return res.status(403).json({
+          success: false,
+          error: 'Permission denied to access this Stripe account'
+        });
+      }
+
+      res.status(500).json({
+        success: false,
+        error: 'Error fetching dashboard data',
+        message: error.message
+      });
+    }
+  }
+);
+
 const validatePaymentReceiptRequest = (req, res, next) => {
   const { customerEmail, businessEmail, amount, paymentType, businessName, date, customerName, connectedAccountId } = req.body;
 
