@@ -938,6 +938,78 @@ app.post('/check-payment-status', async (req, res) => {
 });
 
 // Create a login link for the connected account
+// Stripe dashboard data endpoint
+app.post("/stripe-dashboard", async (req, res) => {
+  const { accountId } = req.body;
+  try {
+    // Fetch all required data in parallel
+    const [
+      balance,
+      payouts,
+      charges,
+      account
+    ] = await Promise.all([
+      stripe.balance.retrieve({ stripeAccount: accountId }),
+      stripe.payouts.list({ 
+        limit: 10,
+        stripeAccount: accountId
+      }),
+      stripe.charges.list({
+        limit: 10,
+        stripeAccount: accountId
+      }),
+      stripe.accounts.retrieve(accountId)
+    ]);
+
+    // Format the response according to the specified structure
+    const response = {
+      balance: {
+        available: balance.available.map(({ amount, currency }) => ({
+          amount,
+          currency
+        })),
+        pending: balance.pending.map(({ amount, currency }) => ({
+          amount,
+          currency
+        }))
+      },
+      payouts: payouts.data.map(payout => ({
+        id: payout.id,
+        amount: payout.amount,
+        status: payout.status,
+        created: payout.created
+      })),
+      charges: charges.data.map(charge => ({
+        id: charge.id,
+        amount: charge.amount,
+        status: charge.status,
+        created: charge.created
+      })),
+      account_status: {
+        charges_enabled: account.charges_enabled,
+        payouts_enabled: account.payouts_enabled,
+        requirements: {
+          currently_due: account.requirements.currently_due || [],
+          pending_verification: account.requirements.pending_verification || []
+        }
+      }
+    };
+
+    res.json({
+      success: true,
+      ...response
+    });
+
+  } catch (error) {
+    console.error("Failed to fetch dashboard data:", error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
+  }
+});
+
+// Create a login link for the connected account
 app.post("/create-login-link", async (req, res) => {
   const { accountId } = req.body; // The connected account ID
   try {
