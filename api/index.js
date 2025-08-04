@@ -59,7 +59,8 @@ const corsOptions = {
       'https://www.bidievents.com',
       'https://bidievents.com',
       'http://localhost:3000',
-      'https://bidi-express.vercel.app' // Add the Vercel domain
+      'https://bidi-express.vercel.app', // Add the Vercel domain
+      'https://bidireact-git-stripe-dashboard-baylor-jeppsens-projects.vercel.app'
     ];
     
     if (allowedOrigins.indexOf(origin) !== -1) {
@@ -3833,11 +3834,11 @@ const businessEmailTemplate = ({ amount, paymentType, date, customerName, fees, 
 // Validation middleware for payment receipt request
 /**
  * Fetch Stripe dashboard data for a connected account
- * @route POST /api/stripe-dashboard
+ * @route POST /stripe-dashboard
  * @param {string} accountId - The Stripe Connect account ID
  * @returns {Object} Dashboard data including balance, payouts, charges, and account status
  */
-app.post('/api/stripe-dashboard',
+app.post('/stripe-dashboard',
   stripeAccountLimiter,
   authenticateUser,
   validateStripeAccountId,
