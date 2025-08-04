@@ -3838,7 +3838,7 @@ const businessEmailTemplate = ({ amount, paymentType, date, customerName, fees, 
  * @param {string} accountId - The Stripe Connect account ID
  * @returns {Object} Dashboard data including balance, payouts, charges, and account status
  */
-app.post('/api/stripe/dashboard',
+app.post('/stripe-dashboard',
   stripeAccountLimiter,
   authenticateUser,
   validateStripeAccountId,
