@@ -1776,12 +1776,13 @@ app.post('/trigger-autobid', async (req, res) => {
 
       logger.debug("📋 Request details sanitized for category:", requestDetails.service_category);
 
-      // Find businesses with Auto-Bidding enabled
-      logger.info("🏢 Fetching businesses with auto-bidding enabled...");
+      // Find businesses with Auto-Bidding enabled and live status
+      logger.info("🏢 Fetching businesses with auto-bidding enabled and live status...");
         const { data: autoBidBusinesses, error: businessError } = await supabase
             .from("business_profiles")
-          .select("id, autobid_enabled, business_category")
-            .eq("autobid_enabled", true);
+          .select("id, autobid_enabled, autobid_status, business_category")
+            .eq("autobid_enabled", true)
+            .eq("autobid_status", "live");
 
         if (businessError) {
             logger.error("❌ Error fetching businesses:", businessError.message);
@@ -1810,10 +1811,10 @@ app.post('/trigger-autobid', async (req, res) => {
         for (const business of eligibleBusinesses) {
         logger.info(`🤖 Generating auto-bid for business: ${business.id}`);
                 
-                // Double-check that business still has autobid enabled and is active
+                // Double-check that business still has autobid enabled, is live, and is active
                 const { data: currentBusiness, error: businessCheckError } = await supabase
                     .from("business_profiles")
-                    .select("id, autobid_enabled, business_category, status")
+                    .select("id, autobid_enabled, autobid_status, business_category, status")
                     .eq("id", business.id)
                     .single();
 
@@ -1832,6 +1833,16 @@ app.post('/trigger-autobid', async (req, res) => {
                     bidsGenerated.push({
                         business_id: business.id,
                         status: "autobid_disabled"
+                    });
+                    continue;
+                }
+
+                if (currentBusiness.autobid_status !== 'live') {
+                    logger.warn(`⚠️ Business ${business.id} has autobid status: ${currentBusiness.autobid_status}. Skipping.`);
+                    bidsGenerated.push({
+                        business_id: business.id,
+                        status: "autobid_paused",
+                        autobid_status: currentBusiness.autobid_status
                     });
                     continue;
                 }
@@ -1954,6 +1965,7 @@ app.post('/trigger-autobid', async (req, res) => {
       const otherErrors = bidsGenerated.filter(bid => bid.status === "error").length;
       const businessNotFound = bidsGenerated.filter(bid => bid.status === "business_not_found").length;
       const autobidDisabled = bidsGenerated.filter(bid => bid.status === "autobid_disabled").length;
+      const autobidPaused = bidsGenerated.filter(bid => bid.status === "autobid_paused").length;
       const businessInactive = bidsGenerated.filter(bid => bid.status === "business_inactive").length;
       
       res.status(200).json({
@@ -1969,9 +1981,10 @@ app.post('/trigger-autobid', async (req, res) => {
               other_errors: otherErrors,
               business_not_found: businessNotFound,
               autobid_disabled: autobidDisabled,
+              autobid_paused: autobidPaused,
               business_inactive: businessInactive
           },
-          summary: `${successfulBids} bids generated and stored, ${failedBids + insufficientTraining + noPricingRules + businessNotFound + autobidDisabled + businessInactive} businesses skipped due to insufficient setup or inactive status`
+          summary: `${successfulBids} bids generated and stored, ${failedBids + insufficientTraining + noPricingRules + businessNotFound + autobidDisabled + autobidPaused + businessInactive} businesses skipped due to insufficient setup, paused status, or inactive status`
       });
 
             } catch (error) {
