@@ -868,7 +868,7 @@ app.post("/account", async (req, res) => {
 // This is the endpoint to create a Checkout Session with destination charge
 app.post("/create-checkout-session", async (req, res) => {
   try {
-    const { connectedAccountId, amount, serviceName } = req.body;
+    const { connectedAccountId, amount, serviceName, bidId } = req.body;
 
     console.log("Request Body:", req.body); // Log the incoming request data
 
@@ -878,8 +878,31 @@ app.post("/create-checkout-session", async (req, res) => {
       return res.status(400).send("Missing required fields");
     }
 
-    // Calculate the 5% application fee from the business's portion
-    const applicationFeeAmount = Math.round(amount * 0.1); // 10% of the amount in cents
+    // Check if this is an autobid payment
+    let isAutobid = false;
+    if (bidId) {
+      try {
+        const { data: bidData, error: bidError } = await supabase
+          .from("bids")
+          .select("is_autobid")
+          .eq("id", bidId)
+          .single();
+
+        if (!bidError && bidData) {
+          isAutobid = bidData.is_autobid || false;
+          console.log(`Bid ${bidId} is autobid: ${isAutobid}`);
+        }
+      } catch (error) {
+        console.error("Error checking bid autobid status:", error);
+        // Continue with default 10% fee if we can't determine autobid status
+      }
+    }
+
+    // Calculate the application fee based on whether it's an autobid
+    const feePercentage = isAutobid ? 0.2 : 0.1; // 20% for autobids, 10% for regular bids
+    const applicationFeeAmount = Math.round(amount * feePercentage);
+
+    console.log(`Calculated fee: ${feePercentage * 100}% (${applicationFeeAmount} cents) for ${isAutobid ? 'autobid' : 'regular bid'}`);
 
     // Create a Checkout session
     const session = await stripe.checkout.sessions.create({
@@ -905,6 +928,11 @@ app.post("/create-checkout-session", async (req, res) => {
       mode: 'payment',
       ui_mode: 'embedded',
       return_url: 'https://www.savewithbidi.com/payment-status',
+      metadata: {
+        bid_id: bidId,
+        is_autobid: isAutobid.toString(),
+        fee_percentage: (feePercentage * 100).toString()
+      }
     });
 
     console.log("Checkout session created:", session); // Log the session data
@@ -1875,7 +1903,8 @@ app.post('/trigger-autobid', async (req, res) => {
                                     bid_description: generatedBid.description,
                                     category: requestDetails.service_category === 'photography' || requestDetails.service_category === 'videography' ? 'Photography' : 'General',
                                     status: "pending",
-                                    hidden: null
+                                    hidden: null,
+                                    is_autobid: true
                                 },
                             ]);
 
@@ -4024,7 +4053,7 @@ app.post("/stripe-dashboard",
 );
 
 const validatePaymentReceiptRequest = (req, res, next) => {
-  const { customerEmail, businessEmail, amount, paymentType, businessName, date, customerName, connectedAccountId } = req.body;
+  const { customerEmail, businessEmail, amount, paymentType, businessName, date, customerName, connectedAccountId, bidId } = req.body;
 
   // Check required fields
   if (!customerEmail || !businessEmail || !amount || !paymentType || !businessName || !date || !customerName || !connectedAccountId) {
@@ -4073,10 +4102,29 @@ const validatePaymentReceiptRequest = (req, res, next) => {
 // Payment receipt email endpoint
 app.post('/send-payment-receipts', validatePaymentReceiptRequest, async (req, res) => {
   try {
-    const { customerEmail, businessEmail, amount, paymentType, businessName, date, customerName, connectedAccountId } = req.body;
+    const { customerEmail, businessEmail, amount, paymentType, businessName, date, customerName, connectedAccountId, bidId } = req.body;
+
+    // Check if this is an autobid payment to determine fee percentage
+    let feePercentage = 0.10; // Default 10% fee
+    if (bidId) {
+      try {
+        const { data: bidData, error: bidError } = await supabase
+          .from("bids")
+          .select("is_autobid")
+          .eq("id", bidId)
+          .single();
+
+        if (!bidError && bidData && bidData.is_autobid) {
+          feePercentage = 0.20; // 20% fee for autobids
+        }
+      } catch (error) {
+        console.error("Error checking bid autobid status for receipt:", error);
+        // Continue with default 10% fee if we can't determine autobid status
+      }
+    }
 
     // Calculate fees and final amount
-    const fees = amount * 0.10; // 10% fee
+    const fees = amount * feePercentage;
     const finalAmount = amount - fees;
 
     // Get Stripe login link
@@ -4113,7 +4161,9 @@ app.post('/send-payment-receipts', validatePaymentReceiptRequest, async (req, re
       businessName,
       customerName,
       fees,
-      finalAmount
+      finalAmount,
+      feePercentage: feePercentage * 100,
+      isAutobid: feePercentage === 0.20
     });
 
     // Send customer receipt
