@@ -816,6 +816,52 @@ app.options("/account-status", (req, res) => {
   res.status(200).end();
 });
 
+// Get saved Stripe account ID for a user
+app.get("/stripe-account/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    if (!userId) {
+      return res.status(400).json({ error: "User ID is required" });
+    }
+
+    console.log(`🔍 Retrieving Stripe account for user: ${userId}`);
+
+    const { data, error } = await supabase
+      .from('business_profiles')
+      .select('stripe_account_id, updated_at')
+      .eq('user_id', userId)
+      .single();
+
+    if (error) {
+      console.error("Database error:", error);
+      return res.status(500).json({ error: "Failed to retrieve Stripe account" });
+    }
+
+    if (!data) {
+      return res.status(404).json({ error: "Business profile not found" });
+    }
+
+    res.json({
+      success: true,
+      stripeAccountId: data.stripe_account_id,
+      updatedAt: data.updated_at
+    });
+
+  } catch (error) {
+    console.error("Error retrieving Stripe account:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Handle OPTIONS requests for the stripe-account endpoint
+app.options("/stripe-account/:userId", (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.status(200).end();
+});
+
 // This is the endpoint for creating a connected account
 app.post("/account", async (req, res) => {
   try {
@@ -874,8 +920,41 @@ app.post("/account", async (req, res) => {
       throw stripeError;
     }
 
+    // Save the Stripe account ID to the database if user ID is provided
+    const userId = req.body.userId || req.body.user_id;
+    if (userId) {
+      try {
+        // Update the user's business profile with the Stripe account ID
+        const { data: updateData, error: updateError } = await supabase
+          .from('business_profiles')
+          .update({ 
+            stripe_account_id: account.id,
+            updated_at: new Date().toISOString()
+          })
+          .eq('user_id', userId)
+          .select();
+
+        if (updateError) {
+          console.error("Failed to save Stripe account ID to database:", updateError);
+          // Don't fail the request, just log the error
+        } else {
+          console.log("Successfully saved Stripe account ID to database:", {
+            userId,
+            stripeAccountId: account.id,
+            updatedProfile: updateData
+          });
+        }
+      } catch (dbError) {
+        console.error("Database error while saving Stripe account ID:", dbError);
+        // Don't fail the request, just log the error
+      }
+    } else {
+      console.log("No user ID provided, skipping database save");
+    }
+
     res.json({
-      account: account.id,
+      accountId: account.id,
+      saved: !!userId
     });
   } catch (error) {
     console.error(
