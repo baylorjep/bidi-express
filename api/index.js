@@ -89,7 +89,7 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';");
+  res.setHeader('Content-Security-Policy', "default-src 'self' https://*.stripe.com https://*.stripe.network; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.stripe.com https://*.stripe.network; style-src 'self' 'unsafe-inline' https://*.stripe.com; connect-src 'self' https://*.stripe.com https://*.stripe.network https://api.stripe.com; frame-src 'self' https://*.stripe.com https://*.stripe.network;");
   next();
 });
 
@@ -792,6 +792,30 @@ app.options("/account", (req, res) => {
   res.status(200).end();
 });
 
+// Handle OPTIONS requests for the account_session endpoint
+app.options("/account_session", (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.status(200).end();
+});
+
+// Handle OPTIONS requests for the verify-account endpoint
+app.options("/verify-account", (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.status(200).end();
+});
+
+// Handle OPTIONS requests for the account-status endpoint
+app.options("/account-status", (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.status(200).end();
+});
+
 // This is the endpoint for creating a connected account
 app.post("/account", async (req, res) => {
   try {
@@ -1088,20 +1112,34 @@ app.post("/verify-account", async (req, res) => {
     const account = await stripe.accounts.retrieve(accountId);
     
     // Check if the account is valid and properly set up
+    // For Express accounts, we need to be more flexible with verification
     const isValid = account && 
                    account.details_submitted && 
-                   account.charges_enabled && 
                    account.payouts_enabled;
+
+    // Enhanced status information for better frontend handling
+    const status = {
+      isValid,
+      details: {
+        detailsSubmitted: account.details_submitted,
+        payoutsEnabled: account.payouts_enabled,
+        chargesEnabled: account.charges_enabled,
+        pendingRequirements: account.requirements?.currently_due || [],
+        accountStatus: account.charges_enabled ? 'active' : 'pending_review',
+        disabledReason: account.requirements?.disabled_reason || null
+      }
+    };
 
     console.log(`✅ Account verification result:`, {
       accountId,
       isValid,
       details_submitted: account.details_submitted,
       charges_enabled: account.charges_enabled,
-      payouts_enabled: account.payouts_enabled
+      payouts_enabled: account.payouts_enabled,
+      pendingRequirements: account.requirements?.currently_due || []
     });
 
-    res.json({ isValid });
+    res.json(status);
   } catch (error) {
     console.error("❌ Error verifying account:", error);
     res.status(500).json({ error: error.message });
@@ -1134,6 +1172,62 @@ app.post("/delete-account", async (req, res) => {
   } catch (error) {
     console.error("❌ Error deleting account:", error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Get detailed account status for progress tracking
+app.post("/account-status", async (req, res) => {
+  try {
+    const { accountId } = req.body;
+    
+    if (!accountId) {
+      return res.status(400).json({ error: "Account ID is required" });
+    }
+
+    console.log(`📊 Getting detailed status for account: ${accountId}`);
+
+    // Retrieve the account from Stripe
+    const account = await stripe.accounts.retrieve(accountId);
+    
+    // Determine progress status for different onboarding steps
+    const progressStatus = {
+      identityVerified: account.details_submitted && 
+                       (!account.requirements?.currently_due || 
+                        !account.requirements.currently_due.includes('individual.verification.document')),
+      bankingDetails: account.payouts_enabled,
+      accountComplete: account.details_submitted && account.payouts_enabled,
+      chargesEnabled: account.charges_enabled,
+      accountStatus: account.charges_enabled ? 'active' : 'pending_review'
+    };
+
+    // Enhanced status information
+    const status = {
+      success: true,
+      accountId,
+      progressStatus,
+      details: {
+        detailsSubmitted: account.details_submitted,
+        payoutsEnabled: account.payouts_enabled,
+        chargesEnabled: account.charges_enabled,
+        pendingRequirements: account.requirements?.currently_due || [],
+        disabledReason: account.requirements?.disabled_reason || null,
+        requirements: account.requirements || {}
+      }
+    };
+
+    console.log(`✅ Account status result:`, {
+      accountId,
+      progressStatus,
+      accountStatus: status.details.accountStatus
+    });
+
+    res.json(status);
+  } catch (error) {
+    console.error("❌ Error getting account status:", error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
   }
 });
 
