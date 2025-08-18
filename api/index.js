@@ -1418,32 +1418,28 @@ async function handlePaymentIntentFailed(paymentIntent) {
   // await updateDatabaseForFailedPayment(paymentIntent);
 }
 
-// Nodemailer SMTP/email setup
-const SibApiV3Sdk = require('sib-api-v3-sdk');
-
-// Initialize Brevo client
-const defaultClient = SibApiV3Sdk.ApiClient.instance;
-const apiKey = defaultClient.authentications['api-key'];
-apiKey.apiKey = process.env.BREVO_API_KEY; // Store your API key securely
-
 // Middleware
 app.use(bodyParser.json());
 
-// Function to send an email via Brevo
+// Function to send an email via Resend
 const sendEmailNotification = async (recipientEmail, subject, htmlContent) => {
     try {
-        const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
-        const sendSmtpEmail = new SibApiV3Sdk.SendSmtpEmail({
-            to: [{ email: recipientEmail }],
-            sender: { name: 'Bidi', email: 'savewithbidi@gmail.com' },
-            subject: subject,
-            htmlContent: htmlContent
-        });
+        if (!process.env.RESEND_API_KEY) {
+            throw new Error('RESEND_API_KEY environment variable is not set');
+        }
 
-        const data = await apiInstance.sendTransacEmail(sendSmtpEmail);
-        console.log('API called successfully. Returned data: ' + data);
+        const data = await resend.emails.send({
+            from: 'noreply@savewithbidi.com',
+            to: recipientEmail,
+            subject: subject,
+            html: htmlContent,
+        });
+        
+        console.log('Email sent successfully via Resend');
+        return data;
     } catch (error) {
-        console.error('Error sending email:', error);
+        console.error('Error sending email via Resend:', error);
+        throw error;
     }
 };
 
@@ -1526,6 +1522,11 @@ app.post('/create-plus-checkout-session', async (req, res) => {
 app.post('/api/send-resend-email', async (req, res) => {
   const { category, businesses } = req.body;
 
+  console.log('📧 === EMAIL NOTIFICATION REQUEST ===');
+  console.log('Category:', category);
+  console.log('Businesses array length:', businesses?.length || 0);
+  console.log('Businesses data:', JSON.stringify(businesses, null, 2));
+
   if (!category) {
     return res.status(400).json({ error: "Missing required field: category." });
   }
@@ -1535,33 +1536,48 @@ app.post('/api/send-resend-email', async (req, res) => {
 
     if (Array.isArray(businesses) && businesses.length > 0) {
       // Use provided businesses array
+      console.log('✅ Using provided businesses array');
       recipients = businesses.filter(biz => biz.email && biz.businessName && biz.budget && biz.location && biz.date);
+      console.log('📋 Filtered recipients:', recipients.length);
+      console.log('📋 Recipients details:', JSON.stringify(recipients, null, 2));
     } else {
       // Fallback: fetch from Supabase as before
-    const { data: users, error: usersError } = await supabase
-      .from('business_profiles')
+      console.log('⚠️ No businesses provided, falling back to Supabase fetch');
+      console.log('🔍 Searching for businesses in category:', category);
+      
+      const { data: users, error: usersError } = await supabase
+        .from('business_profiles')
         .select('id, business_name')
-      .eq('business_category', category);
+        .eq('business_category', category);
 
-    if (usersError) {
-      console.error("Error fetching users by category:", usersError.message);
-      return res.status(500).json({ error: "Failed to fetch users by category." });
-    }
+      if (usersError) {
+        console.error("Error fetching users by category:", usersError.message);
+        return res.status(500).json({ error: "Failed to fetch users by category." });
+      }
 
-    if (!users || users.length === 0) {
-      return res.status(404).json({ error: `No users found in category: ${category}.` });
-    }
+      console.log('📊 Found users in category:', users?.length || 0);
+      console.log('📊 Users data:', JSON.stringify(users, null, 2));
 
-    const userIds = users.map(user => user.id);
-    const { data: emails, error: emailsError } = await supabase
-      .from('profiles')
+      if (!users || users.length === 0) {
+        console.log('❌ No users found in category:', category);
+        return res.status(404).json({ error: `No users found in category: ${category}.` });
+      }
+
+      const userIds = users.map(user => user.id);
+      console.log('🆔 User IDs to fetch emails for:', userIds);
+      
+      const { data: emails, error: emailsError } = await supabase
+        .from('profiles')
         .select('id, email')
-      .in('id', userIds);
+        .in('id', userIds);
 
-    if (emailsError) {
-      console.error("Error fetching emails:", emailsError.message);
-      return res.status(500).json({ error: "Failed to fetch emails for users." });
-    }
+      if (emailsError) {
+        console.error("Error fetching emails:", emailsError.message);
+        return res.status(500).json({ error: "Failed to fetch emails for users." });
+      }
+
+      console.log('📧 Emails fetched:', emails?.length || 0);
+      console.log('📧 Emails data:', JSON.stringify(emails, null, 2));
 
       // You may want to fetch budget/location/date from somewhere else or set as "N/A"
       recipients = users.map(user => {
@@ -1574,14 +1590,23 @@ app.post('/api/send-resend-email', async (req, res) => {
           date: "N/A"
         };
       }).filter(r => r.email);
+      
+      console.log('📋 Final recipients from Supabase:', recipients.length);
+      console.log('📋 Recipients details:', JSON.stringify(recipients, null, 2));
     }
+
+    console.log('🚀 Starting email sending process...');
+    console.log('📧 Total recipients to process:', recipients.length);
 
     // Batch sending (2 per second)
     const batchSize = 2;
     let batchIndex = 0;
+    let emailsSent = 0;
+    let emailsFailed = 0;
 
     while (batchIndex < recipients.length) {
       const batch = recipients.slice(batchIndex, batchIndex + batchSize);
+      console.log(`📦 Processing batch ${Math.floor(batchIndex/batchSize) + 1}:`, batch.length, 'emails');
 
       await Promise.all(
         batch.map(async ({ email, businessName, budget, location, date }) => {
@@ -1655,22 +1680,37 @@ app.post('/api/send-resend-email', async (req, res) => {
               html: htmlContent,
             });
             console.log(`✅ Email sent to: ${email}`);
+            emailsSent++;
           } catch (emailError) {
             console.error(`❌ Failed to send email to ${email}:`, emailError.message);
+            emailsFailed++;
           }
         })
       );
 
       batchIndex += batchSize;
       if (batchIndex < recipients.length) {
+        console.log('⏳ Waiting 1 second before next batch...');
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
 
-    res.status(200).json({ message: `Emails sent successfully to all users in category: ${category}.` });
+    console.log('📊 === EMAIL SENDING COMPLETE ===');
+    console.log('✅ Emails sent successfully:', emailsSent);
+    console.log('❌ Emails failed:', emailsFailed);
+    console.log('📧 Total processed:', recipients.length);
+
+    res.status(200).json({ 
+      message: `Emails sent successfully to all users in category: ${category}.`,
+      stats: {
+        total: recipients.length,
+        sent: emailsSent,
+        failed: emailsFailed
+      }
+    });
 
   } catch (error) {
-    console.error("Error sending emails:", error.message);
+    console.error("❌ Error sending emails:", error.message);
     res.status(500).json({ error: "Failed to send emails.", details: error.message });
   }
 });
@@ -4400,5 +4440,77 @@ app.post('/send-payment-receipts', validatePaymentReceiptRequest, async (req, re
       error: 'Failed to send emails',
       message: 'An error occurred while sending the payment receipt emails'
     });
+  }
+});
+
+// Debug endpoint to check business categories in database
+app.get('/api/debug/business-categories', async (req, res) => {
+  try {
+    console.log('🔍 === DEBUG: CHECKING BUSINESS CATEGORIES ===');
+    
+    // Get all unique business categories
+    const { data: categories, error: categoriesError } = await supabase
+      .from('business_profiles')
+      .select('business_category')
+      .not('business_category', 'is', null);
+
+    if (categoriesError) {
+      console.error('❌ Error fetching categories:', categoriesError);
+      return res.status(500).json({ error: 'Failed to fetch categories' });
+    }
+
+    // Count businesses in each category
+    const categoryCounts = {};
+    const allCategories = new Set();
+    
+    categories.forEach(item => {
+      if (item.business_category) {
+        allCategories.add(item.business_category);
+        categoryCounts[item.business_category] = (categoryCounts[item.business_category] || 0) + 1;
+      }
+    });
+
+    console.log('📊 Unique categories found:', Array.from(allCategories));
+    console.log('📊 Category counts:', categoryCounts);
+
+    // Get sample businesses from each category
+    const categorySamples = {};
+    for (const category of allCategories) {
+      const { data: sampleBusinesses, error: sampleError } = await supabase
+        .from('business_profiles')
+        .select('id, business_name, business_category, profiles(email)')
+        .eq('business_category', category)
+        .limit(3);
+
+      if (!sampleError && sampleBusinesses) {
+        categorySamples[category] = sampleBusinesses.map(biz => ({
+          id: biz.id,
+          name: biz.business_name,
+          category: biz.business_category,
+          hasEmail: !!biz.profiles?.email
+        }));
+      }
+    }
+
+    res.json({
+      message: 'Business categories debug info',
+      uniqueCategories: Array.from(allCategories),
+      categoryCounts,
+      categorySamples,
+      frontendMapping: {
+        'photographer': 'photography',
+        'videographer': 'videography', 
+        'caterer': 'catering',
+        'planner': 'wedding planner/coordinator',
+        'dj': 'dj',
+        'florist': 'florist',
+        'beauty': 'beauty',
+        'venue': 'venue'
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Debug endpoint error:', error);
+    res.status(500).json({ error: 'Debug endpoint failed', details: error.message });
   }
 });
