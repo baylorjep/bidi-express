@@ -1,4 +1,4 @@
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
 const cheerio = require('cheerio');
 const axios = require('axios');
 const sharp = require('sharp');
@@ -22,18 +22,39 @@ class WebScraperService {
    */
   async initialize() {
     if (!this.browser) {
-      this.browser = await puppeteer.launch({
-        headless: true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--no-first-run',
-          '--no-zygote',
-          '--disable-gpu'
-        ]
-      });
+      try {
+        // For Vercel/serverless environments, use a more compatible configuration
+        this.browser = await puppeteer.launch({
+          headless: true,
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu',
+            '--disable-web-security',
+            '--disable-features=VizDisplayCompositor'
+          ],
+          executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
+        });
+        console.log('Browser initialized successfully');
+      } catch (error) {
+        console.error('Failed to initialize browser:', error);
+        // Fallback: try to use system Chrome if available
+        try {
+          this.browser = await puppeteer.launch({
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
+            executablePath: '/usr/bin/google-chrome' || '/usr/bin/chromium-browser'
+          });
+          console.log('Browser initialized with system Chrome');
+        } catch (fallbackError) {
+          console.error('Fallback browser initialization failed:', fallbackError);
+          throw new Error('Browser initialization failed: ' + fallbackError.message);
+        }
+      }
     }
   }
 
@@ -52,8 +73,6 @@ class WebScraperService {
    */
   async scrapeWebsite(websiteUrl, businessId, businessCategory) {
     try {
-      await this.initialize();
-      
       console.log(`Starting scrape for: ${websiteUrl}`);
       
       // Validate URL
@@ -67,8 +86,25 @@ class WebScraperService {
         throw new Error('Website robots.txt disallows scraping');
       }
 
+      // Try to initialize browser
+      let browserInitialized = false;
+      try {
+        await this.initialize();
+        browserInitialized = true;
+        console.log('Browser initialized successfully');
+      } catch (browserError) {
+        console.warn('Browser initialization failed, falling back to basic scraping:', browserError.message);
+        // Continue with basic scraping
+      }
+
       // Start crawling
-      const scrapedImages = await this.crawlWebsite(websiteUrl, businessCategory);
+      let scrapedImages = [];
+      if (browserInitialized) {
+        scrapedImages = await this.crawlWebsite(websiteUrl, businessCategory);
+      } else {
+        // Fallback: basic scraping without browser
+        scrapedImages = await this.basicScrape(websiteUrl, businessCategory);
+      }
       
       console.log(`Found ${scrapedImages.length} potential images`);
       
@@ -96,7 +132,9 @@ class WebScraperService {
         timestamp: new Date().toISOString()
       };
     } finally {
-      await this.cleanup();
+      if (this.browser) {
+        await this.cleanup();
+      }
     }
   }
 
@@ -131,6 +169,59 @@ class WebScraperService {
       // If robots.txt is not accessible, assume scraping is allowed
       console.log('Robots.txt not accessible, proceeding with scrape');
       return true;
+    }
+  }
+
+  /**
+   * Basic scraping without browser (fallback method)
+   */
+  async basicScrape(url, businessCategory) {
+    try {
+      console.log(`Basic scraping: ${url}`);
+      
+      const response = await axios.get(url, {
+        timeout: 10000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+      });
+      
+      const $ = cheerio.load(response.data);
+      const images = [];
+      
+      // Find all images
+      $('img').each((index, element) => {
+        const $img = $(element);
+        const src = $img.attr('src');
+        const alt = $img.attr('alt') || '';
+        const title = $img.attr('title') || '';
+        const width = $img.attr('width');
+        const height = $img.attr('height');
+        
+        if (src && this.isValidImageUrl(src)) {
+          const absoluteUrl = this.resolveUrl(src, url);
+          
+          // Get surrounding context
+          const context = this.getImageContext($img);
+          
+          images.push({
+            src: absoluteUrl,
+            alt: alt,
+            title: title,
+            width: width ? parseInt(width) : null,
+            height: height ? parseInt(height) : null,
+            context: context,
+            pageUrl: url
+          });
+        }
+      });
+      
+      console.log(`Basic scraping found ${images.length} images`);
+      return images;
+      
+    } catch (error) {
+      console.error(`Basic scraping failed for ${url}:`, error.message);
+      return [];
     }
   }
 
