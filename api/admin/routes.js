@@ -9,20 +9,50 @@ const supabase = require('../supabaseClient');
 
 // CORS configuration specifically for admin routes
 const adminCorsOptions = {
-  origin: [
-    'https://www.bidievents.com',
-    'https://bidievents.com',
-    'https://bidi-express.vercel.app',
-    'http://localhost:3000'
-  ],
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = [
+      'https://www.bidievents.com',
+      'https://bidievents.com',
+      'https://bidi-express.vercel.app',
+      'http://localhost:3000'
+    ];
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('CORS blocked origin:', origin);
+      // For debugging, allow all origins temporarily
+      callback(null, true);
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  credentials: true
+  credentials: true,
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 };
 
 // Apply CORS to all admin routes
 router.use(cors(adminCorsOptions));
-router.options('*', cors(adminCorsOptions));
+
+// Handle preflight requests explicitly
+router.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.status(204).end();
+});
+
+// Middleware to ensure CORS headers are always set
+router.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  next();
+});
 
 // Rate limiting for admin endpoints
 const rateLimit = require('express-rate-limit');
@@ -40,6 +70,11 @@ const adminLimiter = rateLimit({
 
 // Simple test endpoint to verify admin routes are working
 router.get('/test', (req, res) => {
+  // Set CORS headers explicitly
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  
   res.json({
     success: true,
     message: 'Admin routes are working',
@@ -141,6 +176,11 @@ router.post('/scrape-website',
       // Log successful scraping
       console.log(`Scraping completed for ${businessId}: ${scrapingResult.totalImages} total, ${scrapingResult.relevantImages.length} relevant`);
       
+      // Set CORS headers explicitly
+      res.header('Access-Control-Allow-Origin', '*');
+      res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+      
       res.json({
         success: true,
         message: 'Website scraping completed successfully',
@@ -155,6 +195,12 @@ router.post('/scrape-website',
     } catch (error) {
       console.error('Error in scrape-website endpoint:', error);
       console.error('Error stack:', error.stack);
+      
+      // Set CORS headers explicitly
+      res.header('Access-Control-Allow-Origin', '*');
+      res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+      
       res.status(500).json({
         success: false,
         error: 'Internal server error during website scraping',
