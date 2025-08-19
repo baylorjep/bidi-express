@@ -1,10 +1,28 @@
 const express = require('express');
 const router = express.Router();
+const cors = require('cors');
 const authenticateUser = require('../middleware/auth');
 const authenticateAdmin = require('../middleware/adminAuth');
 const WebScraperService = require('../services/webScraperService');
 const ImageProcessingService = require('../services/imageProcessingService');
 const supabase = require('../supabaseClient');
+
+// CORS configuration specifically for admin routes
+const adminCorsOptions = {
+  origin: [
+    'https://www.bidievents.com',
+    'https://bidievents.com',
+    'https://bidi-express.vercel.app',
+    'http://localhost:3000'
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  credentials: true
+};
+
+// Apply CORS to all admin routes
+router.use(cors(adminCorsOptions));
+router.options('*', cors(adminCorsOptions));
 
 // Rate limiting for admin endpoints
 const rateLimit = require('express-rate-limit');
@@ -18,6 +36,15 @@ const adminLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+});
+
+// Simple test endpoint to verify admin routes are working
+router.get('/test', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Admin routes are working',
+    timestamp: new Date().toISOString()
+  });
 });
 
 /**
@@ -46,6 +73,8 @@ router.post('/scrape-website',
   authenticateAdmin,
   async (req, res) => {
     try {
+      console.log('Scrape website endpoint called with:', { websiteUrl: req.body.websiteUrl, businessId: req.body.businessId });
+      
       const { websiteUrl, businessId } = req.body;
       
       // Validate request body
@@ -87,14 +116,18 @@ router.post('/scrape-website',
       console.log(`Admin ${req.user.email} initiated scraping for business ${businessId} (${business.business_name})`);
       
       // Initialize scraping service
+      console.log('Initializing WebScraperService...');
       const scraperService = new WebScraperService();
+      console.log('WebScraperService initialized successfully');
       
       // Start scraping
+      console.log('Starting website scraping...');
       const scrapingResult = await scraperService.scrapeWebsite(
         websiteUrl, 
         businessId, 
         business.business_category
       );
+      console.log('Scraping completed with result:', scrapingResult);
       
       if (!scrapingResult.success) {
         return res.status(500).json({
@@ -121,10 +154,12 @@ router.post('/scrape-website',
 
     } catch (error) {
       console.error('Error in scrape-website endpoint:', error);
+      console.error('Error stack:', error.stack);
       res.status(500).json({
         success: false,
         error: 'Internal server error during website scraping',
-        details: error.message
+        details: error.message,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
       });
     }
   }
