@@ -1,71 +1,29 @@
-const puppeteer = require('puppeteer-core');
 const cheerio = require('cheerio');
 const axios = require('axios');
-const sharp = require('sharp');
-const fs = require('fs').promises;
-const path = require('path');
 const URL = require('url-parse');
-const imageSize = require('image-size');
 
 class WebScraperService {
   constructor() {
-    this.browser = null;
     this.visitedUrls = new Set();
-    this.imageQueue = [];
-    this.maxDepth = 3;
-    this.maxImagesPerSite = 50;
+    this.maxDepth = 2; // Reduced depth since we're not using browser
+    this.maxImagesPerSite = 30; // Reduced limit for basic scraping
     this.rateLimitDelay = 1000; // 1 second between requests
   }
 
   /**
-   * Initialize the browser instance
+   * Initialize the scraper (no-op for HTTP-based scraping)
    */
   async initialize() {
-    if (!this.browser) {
-      try {
-        // For Vercel/serverless environments, use a more compatible configuration
-        this.browser = await puppeteer.launch({
-          headless: true,
-          args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-gpu',
-            '--disable-web-security',
-            '--disable-features=VizDisplayCompositor'
-          ],
-          executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
-        });
-        console.log('Browser initialized successfully');
-      } catch (error) {
-        console.error('Failed to initialize browser:', error);
-        // Fallback: try to use system Chrome if available
-        try {
-          this.browser = await puppeteer.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox'],
-            executablePath: '/usr/bin/google-chrome' || '/usr/bin/chromium-browser'
-          });
-          console.log('Browser initialized with system Chrome');
-        } catch (fallbackError) {
-          console.error('Fallback browser initialization failed:', fallbackError);
-          throw new Error('Browser initialization failed: ' + fallbackError.message);
-        }
-      }
-    }
+    console.log('HTTP-based scraper initialized');
+    return true;
   }
 
   /**
-   * Close the browser instance
+   * Cleanup resources (no-op for HTTP-based scraping)
    */
   async cleanup() {
-    if (this.browser) {
-      await this.browser.close();
-      this.browser = null;
-    }
+    console.log('HTTP-based scraper cleanup completed');
+    return true;
   }
 
   /**
@@ -73,7 +31,7 @@ class WebScraperService {
    */
   async scrapeWebsite(websiteUrl, businessId, businessCategory) {
     try {
-      console.log(`Starting scrape for: ${websiteUrl}`);
+      console.log(`Starting HTTP-based scrape for: ${websiteUrl}`);
       
       // Validate URL
       if (!this.isValidUrl(websiteUrl)) {
@@ -86,25 +44,11 @@ class WebScraperService {
         throw new Error('Website robots.txt disallows scraping');
       }
 
-      // Try to initialize browser
-      let browserInitialized = false;
-      try {
-        await this.initialize();
-        browserInitialized = true;
-        console.log('Browser initialized successfully');
-      } catch (browserError) {
-        console.warn('Browser initialization failed, falling back to basic scraping:', browserError.message);
-        // Continue with basic scraping
-      }
-
-      // Start crawling
-      let scrapedImages = [];
-      if (browserInitialized) {
-        scrapedImages = await this.crawlWebsite(websiteUrl, businessCategory);
-      } else {
-        // Fallback: basic scraping without browser
-        scrapedImages = await this.basicScrape(websiteUrl, businessCategory);
-      }
+      // Initialize scraper
+      await this.initialize();
+      
+      // Start crawling with HTTP-based method
+      const scrapedImages = await this.crawlWebsite(websiteUrl, businessCategory);
       
       console.log(`Found ${scrapedImages.length} potential images`);
       
@@ -132,9 +76,7 @@ class WebScraperService {
         timestamp: new Date().toISOString()
       };
     } finally {
-      if (this.browser) {
-        await this.cleanup();
-      }
+      await this.cleanup();
     }
   }
 
@@ -172,15 +114,63 @@ class WebScraperService {
     }
   }
 
+
+
   /**
-   * Basic scraping without browser (fallback method)
+   * Crawl website and discover images using HTTP requests
    */
-  async basicScrape(url, businessCategory) {
-    try {
-      console.log(`Basic scraping: ${url}`);
+  async crawlWebsite(startUrl, businessCategory) {
+    const images = [];
+    const urlsToVisit = [{ url: startUrl, depth: 0 }];
+    
+    while (urlsToVisit.length > 0 && this.visitedUrls.size < 50) { // Reduced limit
+      const { url, depth } = urlsToVisit.shift();
       
+      if (this.visitedUrls.has(url) || depth > this.maxDepth) {
+        continue;
+      }
+      
+      this.visitedUrls.add(url);
+      
+      try {
+        console.log(`HTTP crawling: ${url} (depth: ${depth})`);
+        
+        // Add rate limiting delay
+        if (depth > 0) {
+          await this.delay(this.rateLimitDelay);
+        }
+        
+        const pageImages = await this.scrapePage(url, businessCategory);
+        images.push(...pageImages);
+        
+        // If we have enough images, stop crawling
+        if (images.length >= this.maxImagesPerSite) {
+          break;
+        }
+        
+        // Find internal links for next level crawling
+        if (depth < this.maxDepth) {
+          const internalLinks = await this.findInternalLinks(url);
+          for (const link of internalLinks.slice(0, 3)) { // Reduced to 3 links per level
+            urlsToVisit.push({ url: link, depth: depth + 1 });
+          }
+        }
+        
+      } catch (error) {
+        console.error(`Error crawling ${url}:`, error.message);
+      }
+    }
+    
+    return images;
+  }
+
+  /**
+   * Scrape a single page for images using HTTP
+   */
+  async scrapePage(url, businessCategory) {
+    try {
       const response = await axios.get(url, {
-        timeout: 10000,
+        timeout: 15000,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
@@ -216,113 +206,6 @@ class WebScraperService {
         }
       });
       
-      console.log(`Basic scraping found ${images.length} images`);
-      return images;
-      
-    } catch (error) {
-      console.error(`Basic scraping failed for ${url}:`, error.message);
-      return [];
-    }
-  }
-
-  /**
-   * Crawl website and discover images
-   */
-  async crawlWebsite(startUrl, businessCategory) {
-    const images = [];
-    const urlsToVisit = [{ url: startUrl, depth: 0 }];
-    
-    while (urlsToVisit.length > 0 && this.visitedUrls.size < 100) {
-      const { url, depth } = urlsToVisit.shift();
-      
-      if (this.visitedUrls.has(url) || depth > this.maxDepth) {
-        continue;
-      }
-      
-      this.visitedUrls.add(url);
-      
-      try {
-        console.log(`Crawling: ${url} (depth: ${depth})`);
-        
-        // Add rate limiting delay
-        if (depth > 0) {
-          await this.delay(this.rateLimitDelay);
-        }
-        
-        const pageImages = await this.scrapePage(url, businessCategory);
-        images.push(...pageImages);
-        
-        // If we have enough images, stop crawling
-        if (images.length >= this.maxImagesPerSite) {
-          break;
-        }
-        
-        // Find internal links for next level crawling
-        if (depth < this.maxDepth) {
-          const internalLinks = await this.findInternalLinks(url);
-          for (const link of internalLinks.slice(0, 5)) { // Limit to 5 links per level
-            urlsToVisit.push({ url: link, depth: depth + 1 });
-          }
-        }
-        
-      } catch (error) {
-        console.error(`Error crawling ${url}:`, error.message);
-      }
-    }
-    
-    return images;
-  }
-
-  /**
-   * Scrape a single page for images
-   */
-  async scrapePage(url, businessCategory) {
-    try {
-      const page = await this.browser.newPage();
-      
-      // Set user agent
-      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
-      
-      // Set timeout
-      await page.setDefaultTimeout(30000);
-      
-      // Navigate to page
-      await page.goto(url, { waitUntil: 'networkidle2' });
-      
-      // Get page content
-      const content = await page.content();
-      const $ = cheerio.load(content);
-      
-      const images = [];
-      
-      // Find all images
-      $('img').each((index, element) => {
-        const $img = $(element);
-        const src = $img.attr('src');
-        const alt = $img.attr('alt') || '';
-        const title = $img.attr('title') || '';
-        const width = $img.attr('width');
-        const height = $img.attr('height');
-        
-        if (src && this.isValidImageUrl(src)) {
-          const absoluteUrl = this.resolveUrl(src, url);
-          
-          // Get surrounding context
-          const context = this.getImageContext($img);
-          
-          images.push({
-            src: absoluteUrl,
-            alt: alt,
-            title: title,
-            width: width ? parseInt(width) : null,
-            height: height ? parseInt(height) : null,
-            context: context,
-            pageUrl: url
-          });
-        }
-      });
-      
-      await page.close();
       return images;
       
     } catch (error) {
@@ -332,37 +215,39 @@ class WebScraperService {
   }
 
   /**
-   * Find internal links on a page
+   * Find internal links on a page using HTTP
    */
   async findInternalLinks(pageUrl) {
     try {
-      const page = await this.browser.newPage();
-      await page.goto(pageUrl, { waitUntil: 'networkidle2' });
+      const response = await axios.get(pageUrl, {
+        timeout: 10000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+      });
       
-      const links = await page.evaluate((url) => {
-        const baseUrl = new URL(url);
-        const internalLinks = [];
-        
-        document.querySelectorAll('a[href]').forEach(link => {
-          const href = link.href;
+      const $ = cheerio.load(response.data);
+      const baseUrl = new URL(pageUrl);
+      const internalLinks = [];
+      
+      $('a[href]').each((index, element) => {
+        const href = $(element).attr('href');
+        if (href) {
           try {
-            const linkUrl = new URL(href);
+            const linkUrl = new URL(href, pageUrl);
             if (linkUrl.hostname === baseUrl.hostname && 
                 !href.includes('#') && 
                 !href.includes('javascript:') &&
-                href !== url) {
-              internalLinks.push(href);
+                href !== pageUrl) {
+              internalLinks.push(linkUrl.href);
             }
           } catch (e) {
             // Skip invalid URLs
           }
-        });
-        
-        return [...new Set(internalLinks)]; // Remove duplicates
-      }, pageUrl);
+        }
+      });
       
-      await page.close();
-      return links;
+      return [...new Set(internalLinks)]; // Remove duplicates
       
     } catch (error) {
       console.error(`Error finding internal links for ${pageUrl}:`, error.message);
