@@ -7,6 +7,49 @@ const WebScraperService = require('../services/webScraperService');
 const ImageProcessingService = require('../services/imageProcessingService');
 const supabase = require('../supabaseClient');
 
+// Simple in-memory status tracking for scraping operations
+const scrapingStatus = new Map();
+
+// Helper function to update scraping status
+const updateScrapingStatus = (businessId, status, progress = null, error = null) => {
+  const currentStatus = scrapingStatus.get(businessId) || {};
+  scrapingStatus.set(businessId, {
+    ...currentStatus,
+    status,
+    progress,
+    error,
+    lastUpdated: new Date().toISOString(),
+    ...(status === 'started' && { startTime: new Date().toISOString() }),
+    ...(status === 'completed' && { endTime: new Date().toISOString() }),
+    ...(status === 'failed' && { endTime: new Date().toISOString() })
+  });
+};
+
+// Helper function to get scraping status
+const getScrapingStatus = (businessId) => {
+  return scrapingStatus.get(businessId) || {
+    status: 'idle',
+    progress: null,
+    error: null,
+    lastUpdated: null,
+    startTime: null,
+    endTime: null
+  };
+};
+
+// Cleanup old status entries (older than 1 hour)
+const cleanupOldStatus = () => {
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  for (const [businessId, status] of scrapingStatus.entries()) {
+    if (status.lastUpdated && new Date(status.lastUpdated) < oneHourAgo) {
+      scrapingStatus.delete(businessId);
+    }
+  }
+};
+
+// Run cleanup every 30 minutes
+setInterval(cleanupOldStatus, 30 * 60 * 1000);
+
 // CORS configuration specifically for admin routes
 const adminCorsOptions = {
   origin: function (origin, callback) {
@@ -68,6 +111,18 @@ const adminLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// More lenient rate limiter for status polling
+const statusLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 60, // Allow 60 requests per minute for status polling
+  message: {
+    success: false,
+    error: 'Too many status requests, please slow down.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Simple test endpoint to verify admin routes are working
 router.get('/test', (req, res) => {
   // Set CORS headers explicitly
@@ -81,6 +136,35 @@ router.get('/test', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
+
+// Clear scraping status for a business (useful for testing)
+router.post('/clear-scraping-status/:businessId',
+  adminLimiter,
+  authenticateUser,
+  authenticateAdmin,
+  async (req, res) => {
+    try {
+      const { businessId } = req.params;
+      
+      // Clear the status
+      scrapingStatus.delete(businessId);
+      
+      res.json({
+        success: true,
+        message: 'Scraping status cleared',
+        businessId: businessId
+      });
+      
+    } catch (error) {
+      console.error('Error clearing scraping status:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error',
+        details: error.message
+      });
+    }
+  }
+);
 
 /**
  * POST /api/admin/scrape-website
@@ -150,13 +234,21 @@ router.post('/scrape-website',
       // Log scraping attempt
       console.log(`Admin ${req.user.email} initiated scraping for business ${businessId} (${business.business_name})`);
       
+      // Update status to started
+      updateScrapingStatus(businessId, 'started', 'Initializing scraping service...');
+      
       // Initialize scraping service
       console.log('Initializing WebScraperService...');
       const scraperService = new WebScraperService();
       console.log('WebScraperService initialized successfully');
       
+      // Update status
+      updateScrapingStatus(businessId, 'started', 'Starting website scraping...');
+      
       // Start scraping
       console.log('Starting website scraping...');
+      updateScrapingStatus(businessId, 'started', 'Crawling website and analyzing images...');
+      
       const scrapingResult = await scraperService.scrapeWebsite(
         websiteUrl, 
         businessId, 
@@ -165,6 +257,9 @@ router.post('/scrape-website',
       console.log('Scraping completed with result:', scrapingResult);
       
       if (!scrapingResult.success) {
+        // Update status to failed
+        updateScrapingStatus(businessId, 'failed', null, scrapingResult.error);
+        
         return res.status(500).json({
           success: false,
           error: scrapingResult.error,
@@ -172,6 +267,10 @@ router.post('/scrape-website',
           businessId
         });
       }
+
+      // Update status with results
+      const statusMessage = `Found ${scrapingResult.totalImages} total images, ${scrapingResult.relevantImages.length} relevant`;
+      updateScrapingStatus(businessId, 'completed', statusMessage);
 
       // Log successful scraping
       console.log(`Scraping completed for ${businessId}: ${scrapingResult.totalImages} total, ${scrapingResult.relevantImages.length} relevant`);
@@ -363,7 +462,7 @@ router.post('/save-scraped-images',
  * Get the status of scraping operations for a business
  */
 router.get('/scraping-status/:businessId',
-  adminLimiter,
+  statusLimiter,
   authenticateUser,
   authenticateAdmin,
   async (req, res) => {
@@ -373,7 +472,7 @@ router.get('/scraping-status/:businessId',
       // Get business info
       const { data: business, error: businessError } = await supabase
         .from('business_profiles')
-        .select('id, business_name, business_category, website_url')
+        .select('id, business_name, business_category, website')
         .eq('id', businessId)
         .single();
 
@@ -391,6 +490,9 @@ router.get('/scraping-status/:businessId',
         .eq('user_id', businessId)
         .eq('photo_type', 'portfolio');
 
+      // Get current scraping status from memory
+      const currentScrapingStatus = getScrapingStatus(businessId);
+
       res.json({
         success: true,
         data: {
@@ -402,7 +504,8 @@ router.get('/scraping-status/:businessId',
           },
           portfolio: {
             totalPhotos: photoCount || 0
-          }
+          },
+          scraping: currentScrapingStatus
         }
       });
 

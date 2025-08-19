@@ -259,13 +259,17 @@ class WebScraperService {
    * Filter and score images based on relevance
    */
   async filterAndScoreImages(images, businessCategory) {
+    console.log(`Filtering ${images.length} images for business category:`, businessCategory);
+    
     const scoredImages = [];
     
     for (const image of images) {
       try {
         const score = await this.calculateImageScore(image, businessCategory);
+        console.log(`Image ${image.src} scored: ${score} (alt: "${image.alt}", title: "${image.title}")`);
         
-        if (score > 0.7) { // Only include images with relevance score > 0.7
+        // Temporarily lower threshold to see what's happening
+        if (score > 0.3) { // Lowered from 0.7 to 0.3 for debugging
           scoredImages.push({
             ...image,
             relevanceScore: score
@@ -275,6 +279,8 @@ class WebScraperService {
         console.error(`Error scoring image ${image.src}:`, error.message);
       }
     }
+    
+    console.log(`Found ${scoredImages.length} images above threshold`);
     
     // Sort by relevance score (highest first)
     scoredImages.sort((a, b) => b.relevanceScore - a.relevanceScore);
@@ -287,37 +293,45 @@ class WebScraperService {
    */
   async calculateImageScore(image, businessCategory) {
     let score = 0;
+    const scoreBreakdown = {};
     
     // Check image dimensions (prefer larger images)
     if (image.width && image.height) {
       const area = image.width * image.height;
       if (area >= 400 * 300) { // Minimum 400x300
         score += 0.3;
+        scoreBreakdown.dimensions = 0.3;
       }
       if (area >= 800 * 600) {
         score += 0.2;
+        scoreBreakdown.dimensions = (scoreBreakdown.dimensions || 0) + 0.2;
       }
     }
     
     // Check alt text quality
     if (image.alt && image.alt.length > 10) {
       score += 0.2;
+      scoreBreakdown.altLength = 0.2;
       if (this.textRelevance(image.alt, businessCategory)) {
         score += 0.3;
+        scoreBreakdown.altRelevance = 0.3;
       }
     }
     
     // Check title quality
     if (image.title && image.title.length > 5) {
       score += 0.1;
+      scoreBreakdown.titleLength = 0.1;
       if (this.textRelevance(image.title, businessCategory)) {
         score += 0.2;
+        scoreBreakdown.titleRelevance = 0.2;
       }
     }
     
     // Check surrounding context
     if (image.context && this.textRelevance(image.context, businessCategory)) {
       score += 0.2;
+      scoreBreakdown.contextRelevance = 0.2;
     }
     
     // Penalize common non-portfolio images
@@ -327,19 +341,35 @@ class WebScraperService {
     for (const keyword of nonPortfolioKeywords) {
       if (imageText.includes(keyword)) {
         score -= 0.1;
+        scoreBreakdown.penalties = (scoreBreakdown.penalties || 0) - 0.1;
       }
     }
     
-    return Math.max(0, Math.min(1, score)); // Ensure score is between 0 and 1
+    const finalScore = Math.max(0, Math.min(1, score)); // Ensure score is between 0 and 1
+    
+    console.log(`Score breakdown for ${image.src}:`, {
+      finalScore,
+      breakdown: scoreBreakdown,
+      alt: image.alt,
+      title: image.title,
+      dimensions: `${image.width}x${image.height}`,
+      businessCategory
+    });
+    
+    return finalScore;
   }
 
   /**
    * Check if text is relevant to business category
    */
   textRelevance(text, businessCategory) {
-    if (!text || !businessCategory) return false;
+    if (!text || !businessCategory) {
+      console.log(`textRelevance: No text (${!!text}) or businessCategory (${!!businessCategory})`);
+      return false;
+    }
     
     const textLower = text.toLowerCase();
+    console.log(`textRelevance: Checking text "${text}" against businessCategory:`, businessCategory);
     
     // Handle both array and string business categories
     const categories = Array.isArray(businessCategory) ? businessCategory : [businessCategory];
@@ -359,13 +389,17 @@ class WebScraperService {
       const categoryLower = category.toLowerCase();
       const keywords = categoryKeywords[categoryLower] || [];
       
+      console.log(`Checking category "${categoryLower}" with keywords:`, keywords);
+      
       for (const keyword of keywords) {
         if (textLower.includes(keyword)) {
+          console.log(`Match found! Text "${text}" contains keyword "${keyword}" for category "${categoryLower}"`);
           return true;
         }
       }
     }
     
+    console.log(`No matches found for text "${text}"`);
     return false;
   }
 
