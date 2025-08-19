@@ -12,6 +12,7 @@ const { generateAutoBidForBusiness } = require('./Autobid');
 const googleCalendarRoutes = require('./google-calendar/routes');
 const googlePlacesRoutes = require('./google-places/routes');
 const authRoutes = require('./auth/routes');
+const adminRoutes = require('./admin/routes');
 const http = require("http");
 const { Server } = require("socket.io");
 // Validate Stripe configuration
@@ -165,6 +166,9 @@ app.use('/api/google-calendar', googleCalendarRoutes);
 
 // Mount Google Places routes
 app.use('/api/google-places', googlePlacesRoutes);
+
+// Mount Admin routes
+app.use('/api/admin', adminRoutes);
 
 // Business Profile routes
 app.get('/api/business-profiles/:id', async (req, res) => {
